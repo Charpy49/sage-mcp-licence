@@ -116,7 +116,7 @@ public sealed class FinanceTools
         {
             "(e.CG_Num LIKE '411%' OR e.CG_Num LIKE '401%')",
             "(e.EC_Lettrage IS NULL OR e.EC_Lettrage = '')",
-            "e.EC_Echeance IS NOT NULL"
+            "e.EC_Echeance IS NOT NULL AND e.EC_Echeance > '19000101'"
         };
         var prm = new Dictionary<string, object?>();
         if (!string.IsNullOrWhiteSpace(date_debut)) { filtres.Add("e.EC_Echeance >= @from"); prm["@from"] = SagePeriod.ParseDate(date_debut, DateTime.Today); }

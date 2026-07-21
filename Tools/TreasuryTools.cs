@@ -78,21 +78,31 @@ public sealed class TreasuryTools
     [McpServerTool(Name = "sage_balance_agee_clients")]
     [Description("Balance âgée clients : répartition de l'encours client non réglé par tranche de retard " +
                  "(non échu, 1-30 j, 31-60 j, 61-90 j, > 90 j) en fonction des dates d'échéance. " +
-                 "Indicateur clé de risque pour le dirigeant. Source : F_ECRITUREC non lettré, comptes 411.")]
+                 "L'arrêté peut être calé sur un exercice comptable défini dans P_Dossier (fin d'exercice) " +
+                 "au lieu d'une date libre. Indicateur clé de risque pour le dirigeant. " +
+                 "Source : F_ECRITUREC non lettré, comptes 411.")]
     public static async Task<string> BalanceAgeeClients(
         SageDatabaseRegistry registry,
-        [Description("Date d'arrêté AAAA-MM-JJ (vide = aujourd'hui).")] string? date_arrete = null,
+        [Description("Date d'arrêté AAAA-MM-JJ (vide = fin de l'exercice sélectionné, ou aujourd'hui).")] string? date_arrete = null,
+        [Description("Numéro d'exercice comptable Sage (1 à 10, défini dans P_Dossier). " +
+                     "Vide = exercice en cours à la date d'arrêté.")] int? exercice = null,
         [Description("Nom de la base Sage (vide = base par défaut).")] string? base_sage = null,
         CancellationToken ct = default)
     {
-        var asOf = SagePeriod.ParseDate(date_arrete, DateTime.Today);
+        var today = DateTime.Today;
+        DateTime? dateArreteSaisie = string.IsNullOrWhiteSpace(date_arrete)
+            ? null : SagePeriod.ParseDate(date_arrete, today);
+
+        var exerciceInfo = await SageExercice.ResolveAsync(registry, base_sage, exercice, dateArreteSaisie ?? today, ct);
+        var asOf = dateArreteSaisie ?? exerciceInfo?.Fin ?? today;
+        if (asOf > today) asOf = today; // l'exercice résolu peut être encore en cours : pas de projection dans le futur
 
         var rows = await registry.QueryAsync(base_sage,
             @"SELECT Tranche, SUM(Montant) AS Total, COUNT(*) AS NbLignes
               FROM (
                 SELECT
                   CASE
-                    WHEN e.EC_Echeance IS NULL THEN '5 - Sans échéance'
+                    WHEN e.EC_Echeance IS NULL OR e.EC_Echeance < '19000101' THEN '5 - Sans échéance'
                     WHEN e.EC_Echeance >= @asOf THEN '0 - Non échu'
                     WHEN DATEDIFF(day, e.EC_Echeance, @asOf) <= 30 THEN '1 - 1 à 30 j'
                     WHEN DATEDIFF(day, e.EC_Echeance, @asOf) <= 60 THEN '2 - 31 à 60 j'
@@ -104,12 +114,17 @@ public sealed class TreasuryTools
                 WHERE e.CG_Num LIKE '411%'
                   AND (e.EC_Lettrage IS NULL OR e.EC_Lettrage = '')
                   AND e.EC_Date <= @asOf
+                  AND e.EC_Date >= @debutExercice
               ) t
               GROUP BY Tranche
               ORDER BY Tranche",
-            new Dictionary<string, object?> { ["@asOf"] = asOf }, ct);
+            new Dictionary<string, object?> { ["@asOf"] = asOf , ["@debutExercice"] = exerciceInfo?.Debut?? new DateTime(DateTime.Today.Year,1,1) }, ct);
 
-        if (rows.Count == 0) return $"Aucun encours client au {asOf:dd/MM/yyyy}.";
+        var libelleExercice = exerciceInfo is not null
+            ? $" (exercice {exerciceInfo.Numero} : {exerciceInfo.Debut:dd/MM/yyyy} - {exerciceInfo.Fin:dd/MM/yyyy})"
+            : "";
+
+        if (rows.Count == 0) return $"Aucun encours client au {asOf:dd/MM/yyyy}{libelleExercice}.";
 
         decimal total = rows.Sum(r => SageFormat.ToDecimal(r["Total"]));
         decimal enRetard = rows.Where(r => !SageFormat.Text(r["Tranche"]).Contains("Non échu")
@@ -122,7 +137,7 @@ public sealed class TreasuryTools
             ("% du total", r => total == 0 ? "0 %"
                 : (SageFormat.ToDecimal(r["Total"]) / total).ToString("P1", SageFormat.Fr)));
 
-        return $"## Balance âgée clients au {asOf:dd/MM/yyyy}\n\n" + table +
+        return $"## Balance âgée clients au {asOf:dd/MM/yyyy}{libelleExercice}\n\n" + table +
                $"\n**Encours total : {SageFormat.Euro(total)}** — dont en retard : {SageFormat.Euro(enRetard)} " +
                $"({(total == 0 ? "0 %" : (enRetard / total).ToString("P1", SageFormat.Fr))})";
     }
