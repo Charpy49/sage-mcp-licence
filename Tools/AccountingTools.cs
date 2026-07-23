@@ -32,7 +32,7 @@ public sealed class AccountingTools
                      SUM(CASE WHEN e.EC_Sens = 1 THEN e.EC_Montant ELSE 0 END) AS Credit
               FROM F_ECRITUREC e
               LEFT JOIN F_COMPTEG g ON g.CG_Num = e.CG_Num
-              WHERE e.EC_Date BETWEEN @from AND @to
+              WHERE e.JM_Date BETWEEN @from AND @to
                 AND e.CG_Num BETWEEN @accStart AND @accEnd
               GROUP BY e.CG_Num
               HAVING SUM(CASE WHEN e.EC_Sens = 0 THEN e.EC_Montant ELSE 0 END) <> 0
@@ -76,10 +76,10 @@ public sealed class AccountingTools
         var top = Math.Clamp(limite ?? 200, 1, 2000);
 
         var rows = await registry.QueryAsync(base_sage,
-            $@"SELECT TOP ({top}) e.EC_Date, e.JO_Num, e.EC_Piece, e.EC_Intitule, e.CT_Num, e.EC_Sens, e.EC_Montant
+            $@"SELECT TOP ({top}) e.JM_Date, e.JO_Num, e.EC_Piece, e.EC_Intitule, e.CT_Num, e.EC_Sens, e.EC_Montant
                FROM F_ECRITUREC e
-               WHERE e.CG_Num LIKE @compte AND e.EC_Date BETWEEN @from AND @to
-               ORDER BY e.EC_Date, e.EC_No",
+               WHERE e.CG_Num LIKE @compte AND e.JM_Date BETWEEN @from AND @to
+               ORDER BY e.JM_Date, e.EC_No",
             new Dictionary<string, object?>
             {
                 ["@compte"] = $"{compte.Trim()}%", ["@from"] = from, ["@to"] = to
@@ -98,7 +98,7 @@ public sealed class AccountingTools
         }).ToList();
 
         var table = SageFormat.Table(enriched,
-            ("Date", r => SageFormat.Date(r["EC_Date"])),
+            ("Date", r => SageFormat.Date(r["JM_Date"])),
             ("Jnl", r => SageFormat.Text(r["JO_Num"])),
             ("Pièce", r => SageFormat.Text(r["EC_Piece"])),
             ("Libellé", r => SageFormat.Text(r["EC_Intitule"])),
@@ -128,11 +128,11 @@ public sealed class AccountingTools
         var top = Math.Clamp(limite ?? 200, 1, 2000);
 
         var rows = await registry.QueryAsync(base_sage,
-            $@"SELECT TOP ({top}) e.EC_Date, e.JO_Num, e.EC_Piece, e.EC_Intitule, e.EC_Echeance,
+            $@"SELECT TOP ({top}) e.JM_Date, e.JO_Num, e.EC_Piece, e.EC_Intitule, e.EC_Echeance,
                       e.EC_Lettrage, e.EC_Sens, e.EC_Montant
                FROM F_ECRITUREC e
-               WHERE e.CT_Num = @tiers AND e.EC_Date BETWEEN @from AND @to
-               ORDER BY e.EC_Date, e.EC_No",
+               WHERE e.CT_Num = @tiers AND e.JM_Date BETWEEN @from AND @to
+               ORDER BY e.JM_Date, e.EC_No",
             new Dictionary<string, object?>
             {
                 ["@tiers"] = tiers.Trim(), ["@from"] = from, ["@to"] = to
@@ -151,7 +151,7 @@ public sealed class AccountingTools
         }).ToList();
 
         var table = SageFormat.Table(enriched,
-            ("Date", r => SageFormat.Date(r["EC_Date"])),
+            ("Date", r => SageFormat.Date(r["JM_Date"])),
             ("Jnl", r => SageFormat.Text(r["JO_Num"])),
             ("Pièce", r => SageFormat.Text(r["EC_Piece"])),
             ("Libellé", r => SageFormat.Text(r["EC_Intitule"])),

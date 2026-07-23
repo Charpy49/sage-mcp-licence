@@ -24,11 +24,11 @@ public sealed class ExecutiveTools
         var racine = string.IsNullOrWhiteSpace(racine_compte) ? "70" : racine_compte.Trim();
 
         var rows = await registry.QueryAsync(base_sage,
-            @"SELECT YEAR(EC_Date) AS Annee, MONTH(EC_Date) AS Mois,
+            @"SELECT YEAR(JM_Date) AS Annee, MONTH(JM_Date) AS Mois,
                      SUM(CASE WHEN EC_Sens = 1 THEN EC_Montant ELSE -EC_Montant END) AS CA
               FROM F_ECRITUREC
-              WHERE CG_Num LIKE @racine AND EC_Date BETWEEN @from AND @to
-              GROUP BY YEAR(EC_Date), MONTH(EC_Date)
+              WHERE CG_Num LIKE @racine AND JM_Date BETWEEN @from AND @to
+              GROUP BY YEAR(JM_Date), MONTH(JM_Date)
               ORDER BY Annee, Mois",
             new Dictionary<string, object?> { ["@racine"] = $"{racine}%", ["@from"] = from, ["@to"] = to }, ct);
 
@@ -60,7 +60,7 @@ public sealed class ExecutiveTools
             @"SELECT LEFT(CG_Num, 2) AS Poste,
                      SUM(CASE WHEN EC_Sens = 1 THEN EC_Montant ELSE -EC_Montant END) AS SoldeCredit
               FROM F_ECRITUREC
-              WHERE LEFT(CG_Num, 1) IN ('6','7') AND EC_Date BETWEEN @from AND @to
+              WHERE LEFT(CG_Num, 1) IN ('6','7') AND JM_Date BETWEEN @from AND @to
               GROUP BY LEFT(CG_Num, 2)
               ORDER BY Poste",
             new Dictionary<string, object?> { ["@from"] = from, ["@to"] = to }, ct);
@@ -445,7 +445,7 @@ public sealed class ExecutiveTools
                 SUM(CASE WHEN LEFT(CG_Num,1)='7' THEN (CASE WHEN EC_Sens=1 THEN EC_Montant ELSE -EC_Montant END) ELSE 0 END) AS Produits,
                 SUM(CASE WHEN LEFT(CG_Num,1)='6' THEN (CASE WHEN EC_Sens=0 THEN EC_Montant ELSE -EC_Montant END) ELSE 0 END) AS Charges
               FROM F_ECRITUREC
-              WHERE LEFT(CG_Num,1) IN ('6','7') AND EC_Date BETWEEN @from AND @to",
+              WHERE LEFT(CG_Num,1) IN ('6','7') AND JM_Date BETWEEN @from AND @to",
             new Dictionary<string, object?> { ["@from"] = from, ["@to"] = to }, ct);
 
         var encours = await registry.QueryAsync(base_sage,
@@ -454,8 +454,8 @@ public sealed class ExecutiveTools
                 SUM(CASE WHEN CG_Num LIKE '401%' THEN (CASE WHEN EC_Sens=1 THEN EC_Montant ELSE -EC_Montant END) ELSE 0 END) AS Fournisseurs
               FROM F_ECRITUREC
               WHERE (CG_Num LIKE '411%' OR CG_Num LIKE '401%')
-                AND (EC_Lettrage IS NULL OR EC_Lettrage = '') AND EC_Date <= @to",
-            new Dictionary<string, object?> { ["@to"] = to }, ct);
+                AND (EC_Lettrage IS NULL OR EC_Lettrage = '') AND JM_Date BETWEEN @from AND @to",
+            new Dictionary<string, object?> { ["@to"] = to, ["@from"] = from }, ct);
 
         var produits = SageFormat.ToDecimal(gestion[0]["Produits"]);
         var charges = SageFormat.ToDecimal(gestion[0]["Charges"]);

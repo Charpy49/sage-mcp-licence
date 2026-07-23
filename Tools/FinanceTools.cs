@@ -27,7 +27,7 @@ public sealed class FinanceTools
                      SUM(CASE WHEN e.EC_Sens = 1 THEN e.EC_Montant ELSE -e.EC_Montant END) AS SoldeCredit
               FROM F_ECRITUREC e
               LEFT JOIN F_COMPTEG g ON g.CG_Num = e.CG_Num
-              WHERE (e.CG_Num LIKE '4457%' OR e.CG_Num LIKE '4456%') AND e.EC_Date BETWEEN @from AND @to
+              WHERE (e.CG_Num LIKE '4457%' OR e.CG_Num LIKE '4456%') AND e.JM_Date BETWEEN @from AND @to
               GROUP BY e.CG_Num
               HAVING SUM(CASE WHEN e.EC_Sens = 1 THEN e.EC_Montant ELSE -e.EC_Montant END) <> 0
               ORDER BY e.CG_Num", prm, ct);
@@ -83,7 +83,7 @@ public sealed class FinanceTools
               FROM F_ECRITUREC e
               LEFT JOIN F_COMPTEG g ON g.CG_Num = e.CG_Num
               WHERE (e.CG_Num LIKE '512%' OR e.CG_Num LIKE '514%' OR e.CG_Num LIKE '53%')
-                AND e.EC_Date <= @asOf
+                AND e.JM_Date <= @asOf
               GROUP BY e.CG_Num
               HAVING SUM(CASE WHEN e.EC_Sens = 0 THEN e.EC_Montant ELSE -e.EC_Montant END) <> 0
               ORDER BY Solde DESC",

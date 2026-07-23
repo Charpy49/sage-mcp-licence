@@ -33,7 +33,7 @@ public sealed class SuiviTools
                   END AS Tranche,
                   CASE WHEN e.EC_Sens = 1 THEN e.EC_Montant ELSE -e.EC_Montant END AS Montant
                 FROM F_ECRITUREC e
-                WHERE e.CG_Num LIKE '401%' AND (e.EC_Lettrage IS NULL OR e.EC_Lettrage = '') AND e.EC_Date <= @asOf
+                WHERE e.CG_Num LIKE '401%' AND (e.EC_Lettrage IS NULL OR e.EC_Lettrage = '') AND e.JM_Date <= @asOf
               ) t
               GROUP BY Tranche ORDER BY Tranche",
             new Dictionary<string, object?> { ["@asOf"] = asOf }, ct);
@@ -157,10 +157,10 @@ public sealed class SuiviTools
         var (from, to) = SagePeriod.Resolve(date_debut, date_fin);
         var top = Math.Clamp(limite ?? 200, 1, 2000);
         var rows = await registry.QueryAsync(base_sage,
-            $@"SELECT TOP ({top}) e.EC_Date, e.EC_Piece, e.CG_Num, e.CT_Num, e.EC_Intitule, e.EC_Sens, e.EC_Montant
+            $@"SELECT TOP ({top}) e.JM_Date, e.EC_Piece, e.CG_Num, e.CT_Num, e.EC_Intitule, e.EC_Sens, e.EC_Montant
                FROM F_ECRITUREC e
-               WHERE e.JO_Num = @jo AND e.EC_Date BETWEEN @from AND @to
-               ORDER BY e.EC_Date, e.EC_No",
+               WHERE e.JO_Num = @jo AND e.JM_Date BETWEEN @from AND @to
+               ORDER BY e.JM_Date, e.EC_No",
             new Dictionary<string, object?> { ["@jo"] = journal.Trim(), ["@from"] = from, ["@to"] = to }, ct);
 
         if (rows.Count == 0) return $"Aucune écriture dans le journal {journal} {SagePeriod.Describe(from, to)}.";
@@ -172,7 +172,7 @@ public sealed class SuiviTools
             else totC += SageFormat.ToDecimal(r["EC_Montant"]);
         }
         var table = SageFormat.Table(rows,
-            ("Date", r => SageFormat.Date(r["EC_Date"])),
+            ("Date", r => SageFormat.Date(r["JM_Date"])),
             ("Pièce", r => SageFormat.Text(r["EC_Piece"])),
             ("Compte", r => SageFormat.Text(r["CG_Num"])),
             ("Tiers", r => SageFormat.Text(r["CT_Num"])),

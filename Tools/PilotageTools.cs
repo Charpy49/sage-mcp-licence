@@ -24,11 +24,11 @@ public sealed class PilotageTools
         if (a1 > a2) (a1, a2) = (a2, a1);
 
         var rows = await registry.QueryAsync(base_sage,
-            @"SELECT YEAR(EC_Date) AS An,
+            @"SELECT YEAR(JM_Date) AS An,
                      SUM(CASE WHEN EC_Sens = 1 THEN EC_Montant ELSE -EC_Montant END) AS CA
               FROM F_ECRITUREC
-              WHERE CG_Num LIKE '70%' AND YEAR(EC_Date) BETWEEN @a1 AND @a2
-              GROUP BY YEAR(EC_Date)
+              WHERE CG_Num LIKE '70%' AND YEAR(JM_Date) BETWEEN @a1 AND @a2
+              GROUP BY YEAR(JM_Date)
               ORDER BY An",
             new Dictionary<string, object?> { ["@a1"] = a1, ["@a2"] = a2 }, ct);
 
@@ -110,7 +110,7 @@ public sealed class PilotageTools
                       SUM(SUM(CASE WHEN e.EC_Sens = 1 THEN e.EC_Montant ELSE -e.EC_Montant END)) OVER () AS GrandTotal
                FROM F_ECRITUREC e
                LEFT JOIN F_COMPTET c ON c.CT_Num = e.CT_Num
-               WHERE e.CG_Num LIKE '401%' AND e.EC_Date BETWEEN @from AND @to
+               WHERE e.CG_Num LIKE '401%' AND e.JM_Date BETWEEN @from AND @to
                  AND e.CT_Num IS NOT NULL AND e.CT_Num <> ''
                GROUP BY e.CT_Num
                ORDER BY Achats DESC",
@@ -141,11 +141,11 @@ public sealed class PilotageTools
     {
         var (from, to) = SagePeriod.Resolve(date_debut, date_fin);
         var rows = await registry.QueryAsync(base_sage,
-            @"SELECT YEAR(EC_Date) AS Annee, MONTH(EC_Date) AS Mois,
+            @"SELECT YEAR(JM_Date) AS Annee, MONTH(JM_Date) AS Mois,
                      SUM(CASE WHEN EC_Sens = 0 THEN EC_Montant ELSE -EC_Montant END) AS Achats
               FROM F_ECRITUREC
-              WHERE CG_Num LIKE '60%' AND EC_Date BETWEEN @from AND @to
-              GROUP BY YEAR(EC_Date), MONTH(EC_Date)
+              WHERE CG_Num LIKE '60%' AND JM_Date BETWEEN @from AND @to
+              GROUP BY YEAR(JM_Date), MONTH(JM_Date)
               ORDER BY Annee, Mois",
             new Dictionary<string, object?> { ["@from"] = from, ["@to"] = to }, ct);
 
@@ -266,7 +266,7 @@ public sealed class PilotageTools
         var encRows = await registry.QueryAsync(base_sage,
             @"SELECT SUM(CASE WHEN EC_Sens = 0 THEN EC_Montant ELSE -EC_Montant END) AS Encours
               FROM F_ECRITUREC
-              WHERE CT_Num = @t AND CG_Num LIKE '411%' AND (EC_Lettrage IS NULL OR EC_Lettrage = '')", prm, ct);
+              WHERE CT_Num = @t AND CG_Num LIKE '411%' AND (EC_Lettrage IS NULL OR EC_Lettrage = '') AND JM_Date BETWEEN @from AND @to", new Dictionary<string, object?> { ["@t"] = tiers.Trim(), ["@from"] = from, ["@to"] = to }, ct);
 
         var dernieres = await registry.QueryAsync(base_sage,
             @"SELECT TOP 5 DO_Piece, DO_Date, DO_Ref, DO_TotalHT, DO_NetAPayer

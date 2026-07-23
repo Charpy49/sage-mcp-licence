@@ -202,15 +202,15 @@ public sealed class AnalyseTools
                 SUM(CASE WHEN LEFT(CG_Num,1)='7' THEN (CASE WHEN EC_Sens=1 THEN EC_Montant ELSE -EC_Montant END) ELSE 0 END) AS Produits,
                 SUM(CASE WHEN LEFT(CG_Num,1)='6' THEN (CASE WHEN EC_Sens=0 THEN EC_Montant ELSE -EC_Montant END) ELSE 0 END) AS Charges,
                 SUM(CASE WHEN CG_Num LIKE '60%' THEN (CASE WHEN EC_Sens=0 THEN EC_Montant ELSE -EC_Montant END) ELSE 0 END) AS Achats
-              FROM F_ECRITUREC WHERE EC_Date BETWEEN @from AND @to",
+              FROM F_ECRITUREC WHERE JM_Date BETWEEN @from AND @to",
             new Dictionary<string, object?> { ["@from"] = from, ["@to"] = to }, ct);
         var encours = await registry.QueryAsync(base_sage,
             @"SELECT
                 SUM(CASE WHEN CG_Num LIKE '411%' THEN (CASE WHEN EC_Sens=0 THEN EC_Montant ELSE -EC_Montant END) ELSE 0 END) AS Clients,
                 SUM(CASE WHEN CG_Num LIKE '401%' THEN (CASE WHEN EC_Sens=1 THEN EC_Montant ELSE -EC_Montant END) ELSE 0 END) AS Fournisseurs
               FROM F_ECRITUREC
-              WHERE (CG_Num LIKE '411%' OR CG_Num LIKE '401%') AND (EC_Lettrage IS NULL OR EC_Lettrage='') AND EC_Date <= @to",
-            new Dictionary<string, object?> { ["@to"] = to }, ct);
+              WHERE (CG_Num LIKE '411%' OR CG_Num LIKE '401%') AND (EC_Lettrage IS NULL OR EC_Lettrage='') AND JM_Date BETWEEN @from AND @to",
+            new Dictionary<string, object?> { ["@from"] = from, ["@to"] = to }, ct);
 
         var produits = SageFormat.ToDecimal(gestion[0]["Produits"]);
         var charges = SageFormat.ToDecimal(gestion[0]["Charges"]);
