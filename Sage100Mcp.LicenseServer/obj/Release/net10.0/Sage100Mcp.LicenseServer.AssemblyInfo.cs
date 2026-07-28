@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Sage100Mcp.LicenseServer")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+50cc3b19ac5e91e3ab61bb958718969b69f69e2a")]
 [assembly: System.Reflection.AssemblyProductAttribute("Sage100Mcp.LicenseServer")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Sage100Mcp.LicenseServer")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
