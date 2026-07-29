@@ -196,6 +196,71 @@ public sealed class PilotageTools
                $"\n**Total carnet : {SageFormat.Euro(total)}** sur {totalNb} commandes ({rows.Count} clients affichés)";
     }
 
+    [McpServerTool(Name = "sage_devis_clients_en_cours")]
+    [Description("Devis clients en cours (documents de vente DO_Type = 0 au statut « en cours », donc ni acceptés, " +
+                 "ni refusés, ni transformés en commande/facture), regroupés par client. " +
+                 "Pipeline commercial à convertir : montant potentiel, nombre de devis et ancienneté pour les relances.")]
+    public static async Task<string> DevisClientsEnCours(
+        SageDatabaseRegistry registry,
+        [Description("Nombre de clients affichés (défaut 30).")] int? limite = null,
+        [Description("Date d'émission minimale AAAA-MM-JJ (vide = tous les devis en cours, sans limite d'ancienneté).")] string? date_debut = null,
+        [Description("Date d'émission maximale AAAA-MM-JJ (vide = pas de limite).")] string? date_fin = null,
+        [Description("Ancienneté en mois au-delà de laquelle un devis est signalé comme à relancer (défaut 3).")] int? mois_relance = null,
+        [Description("Nom de la base Sage (vide = base par défaut).")] string? base_sage = null,
+        CancellationToken ct = default)
+    {
+        var n = Math.Clamp(limite ?? 30, 1, 300);
+        var mois = Math.Clamp(mois_relance ?? 3, 1, 120);
+        DateTime? from = string.IsNullOrWhiteSpace(date_debut) ? null : SagePeriod.ParseDate(date_debut, DateTime.Today);
+        DateTime? to = string.IsNullOrWhiteSpace(date_fin)
+            ? null
+            : SagePeriod.ParseDate(date_fin, DateTime.Today).AddDays(1).AddTicks(-1);
+        var seuil = DateTime.Today.AddMonths(-mois);
+
+        var rows = await registry.QueryAsync(base_sage,
+            $@"SELECT TOP ({n}) d.DO_Tiers, MAX(c.CT_Intitule) AS Intitule,
+                      COUNT(*) AS NbDevis, SUM(d.DO_TotalHT) AS MontantHT,
+                      MIN(d.DO_Date) AS PlusAncien, MAX(d.DO_Date) AS PlusRecent,
+                      SUM(CASE WHEN d.DO_Date < @seuil THEN 1 ELSE 0 END) AS NbARelancer,
+                      SUM(SUM(d.DO_TotalHT)) OVER () AS GrandTotal, SUM(COUNT(*)) OVER () AS GrandNb,
+                      SUM(SUM(CASE WHEN d.DO_Date < @seuil THEN d.DO_TotalHT ELSE 0 END)) OVER () AS GrandTotalARelancer,
+                      SUM(SUM(CASE WHEN d.DO_Date < @seuil THEN 1 ELSE 0 END)) OVER () AS GrandNbARelancer
+               FROM F_DOCENTETE d
+               LEFT JOIN F_COMPTET c ON c.CT_Num = d.DO_Tiers
+               WHERE d.DO_Domaine = 0 AND d.DO_Type = 0 AND d.DO_Statut = 0 AND d.DO_Cloture = 0
+                 AND (@from IS NULL OR d.DO_Date >= @from)
+                 AND (@to IS NULL OR d.DO_Date <= @to)
+               GROUP BY d.DO_Tiers
+               ORDER BY MontantHT DESC",
+            new Dictionary<string, object?> { ["@seuil"] = seuil, ["@from"] = from, ["@to"] = to }, ct);
+
+        var periode = from is null && to is null
+            ? ""
+            : from is null ? $" émis jusqu'au {to:dd/MM/yyyy}"
+            : to is null ? $" émis depuis le {from:dd/MM/yyyy}"
+            : $" émis {SagePeriod.Describe(from.Value, to.Value)}";
+
+        if (rows.Count == 0) return $"Aucun devis client en cours{periode}.";
+
+        decimal total = SageFormat.ToDecimal(rows[0]["GrandTotal"]);
+        long totalNb = SageFormat.ToLong(rows[0]["GrandNb"]);
+        decimal totalRelance = SageFormat.ToDecimal(rows[0]["GrandTotalARelancer"]);
+        long totalNbRelance = SageFormat.ToLong(rows[0]["GrandNbARelancer"]);
+
+        var table = SageFormat.Table(rows,
+            ("Client", r => SageFormat.Text(r["DO_Tiers"])),
+            ("Intitulé", r => SageFormat.Text(r["Intitule"])),
+            ("Nb devis", r => SageFormat.ToLong(r["NbDevis"]).ToString()),
+            ("Montant HT", r => SageFormat.Euro(r["MontantHT"])),
+            ("Plus ancien", r => SageFormat.Date(r["PlusAncien"])),
+            ("Plus récent", r => SageFormat.Date(r["PlusRecent"])),
+            ($"Dont > {mois} mois", r => SageFormat.ToLong(r["NbARelancer"]).ToString()));
+
+        return $"## Devis clients en cours{periode}\n\n" + table +
+               $"\n**Total potentiel : {SageFormat.Euro(total)}** sur {totalNb} devis ({rows.Count} clients affichés)" +
+               $"\n**À relancer (plus de {mois} mois) : {totalNbRelance} devis pour {SageFormat.Euro(totalRelance)}**";
+    }
+
     [McpServerTool(Name = "sage_clients_inactifs")]
     [Description("Clients actifs n'ayant plus été facturés depuis un certain nombre de mois (défaut 6), " +
                  "triés par chiffre d'affaires historique décroissant — pour cibler les relances commerciales.")]
