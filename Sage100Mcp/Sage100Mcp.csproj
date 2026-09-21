@@ -7,6 +7,12 @@
     <Nullable>enable</Nullable>
     <AssemblyName>Sage100Mcp</AssemblyName>
     <RootNamespace>Sage100Mcp</RootNamespace>
+    <!--
+      Version diffusée : remontée dans serverInfo.version (MCP), envoyée au serveur de licences
+      pour l'inventaire du parc, et comparée au manifeste de mise à jour.
+      À incrémenter à chaque publication — c'est la clé de tout le mécanisme de mise à jour.
+    -->
+    <Version>1.2.0</Version>
     <InvariantGlobalization>false</InvariantGlobalization>
   </PropertyGroup>
 

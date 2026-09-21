@@ -30,21 +30,33 @@ else
 
 return;
 
+// Emplacement de appsettings.json.
+//
+// Par défaut le dossier de l'exécutable (et non le répertoire courant) : le client MCP lance le
+// process depuis n'importe où, la configuration doit rester trouvable.
+//
+// Sous le shim de lancement, les binaires vivent dans un dossier par version (versions\1.2.0\…)
+// alors que la configuration — chaînes de connexion Sage comprises — reste à la racine, sinon
+// chaque mise à jour l'écraserait. Le shim indique donc la racine via SAGE100MCP_CONFIG_DIR.
+static string ResolveContentRoot() =>
+    Environment.GetEnvironmentVariable("SAGE100MCP_CONFIG_DIR") is { } dir && Directory.Exists(dir)
+        ? dir
+        : AppContext.BaseDirectory;
+
 static async Task RunStdioAsync(string[] args)
 {
-    // Le content root pointe sur le dossier de l'exécutable (et non le répertoire courant),
-    // pour que appsettings.json soit trouvé quel que soit l'endroit d'où le client MCP lance le process.
     var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
     {
         Args = args,
-        ContentRootPath = AppContext.BaseDirectory
+        ContentRootPath = ResolveContentRoot()
     });
 
     // IMPORTANT : en transport stdio, les logs doivent partir sur stderr,
     // car stdout est réservé au protocole MCP (JSON-RPC).
     builder.Logging.AddConsole(options => options.LogToStandardErrorThreshold = LogLevel.Trace);
 
-    var license = await LicenseGate.ValidateOrExitAsync(builder.Configuration, CancellationToken.None);
+    var license = await LicenseGate.ValidateOrExitAsync(
+        builder.Configuration, McpTransport.Stdio, CancellationToken.None);
 
     builder.Services
         .AddSageMcpServer(builder.Configuration)
@@ -61,7 +73,7 @@ static async Task RunHttpAsync(string[] args)
     var builder = WebApplication.CreateBuilder(new WebApplicationOptions
     {
         Args = args,
-        ContentRootPath = AppContext.BaseDirectory
+        ContentRootPath = ResolveContentRoot()
     });
 
     // Ici stdout n'est plus réservé au JSON-RPC : on garde le logging console standard.
@@ -76,7 +88,8 @@ static async Task RunHttpAsync(string[] args)
         builder.WebHost.UseUrls(McpHttpSecurity.SplitUrls(urls));
     }
 
-    var license = await LicenseGate.ValidateOrExitAsync(builder.Configuration, CancellationToken.None);
+    var license = await LicenseGate.ValidateOrExitAsync(
+        builder.Configuration, McpTransport.Http, CancellationToken.None);
 
     builder.Services
         .AddSageMcpServer(builder.Configuration)

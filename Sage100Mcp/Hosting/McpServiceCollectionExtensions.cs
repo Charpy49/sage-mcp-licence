@@ -19,7 +19,15 @@ public static class McpServiceCollectionExtensions
         services.AddSingleton<SageDatabaseRegistry>();
 
         return services
-            .AddMcpServer()
+            .AddMcpServer(options =>
+            {
+                // Rend la version diffusée visible du client MCP (serverInfo.version).
+                options.ServerInfo = new ModelContextProtocol.Protocol.Implementation
+                {
+                    Name = "Sage100Mcp",
+                    Version = AppVersion.Current
+                };
+            })
             .WithToolsFromAssembly();
     }
 }

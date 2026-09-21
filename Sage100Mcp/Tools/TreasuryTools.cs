@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Text;
 using ModelContextProtocol.Server;
 using Sage100Mcp.Data;
 
@@ -157,5 +158,136 @@ ORDER BY b.CT_Num, b.Tranche"
         return $"## Balance âgée clients au {asOf:dd/MM/yyyy}{libelleExercice}\n\n" + table +
                $"\n**Encours total : {SageFormat.Euro(total)}** — dont en retard : {SageFormat.Euro(enRetard)} " +
                $"({(total == 0 ? "0 %" : (enRetard / total).ToString("P1", SageFormat.Fr))})";
+    }
+
+    [McpServerTool(Name = "sage_conditions_reglement_tiers")]
+    [Description("Conditions de règlement par tiers : délai accordé (comptant, 30 jours nets, 45 jours fin de mois, " +
+                 "jour de tombée…) et mode de règlement (virement, LCR, chèque, CB…), lus dans F_REGLEMENTT et " +
+                 "P_REGLEMENT. Ajoute le délai réellement observé en comptabilité (écart moyen entre date de pièce " +
+                 "et date d'échéance) pour repérer les tiers dont la pratique s'écarte du paramétrage.")]
+    public static async Task<string> ConditionsReglementTiers(
+        SageDatabaseRegistry registry,
+        [Description("Numéro de compte tiers précis (ex. 'GC001232'). Vide = tous les tiers.")] string? tiers = null,
+        [Description("Fragment d'intitulé ou de numéro pour rechercher un tiers (vide = pas de filtre).")] string? recherche = null,
+        [Description("Type de tiers : 'client', 'fournisseur' ou 'tous' (défaut).")] string? type_tiers = null,
+        [Description("Profondeur d'historique pour le délai observé, en mois (défaut 24).")] int? mois_observation = null,
+        [Description("Nombre de lignes affichées (défaut 30, maximum 500).")] int? limite = null,
+        [Description("Nom de la base Sage (vide = base par défaut).")] string? base_sage = null,
+        CancellationToken ct = default)
+    {
+        var n = Math.Clamp(limite ?? 30, 1, 500);
+        var mois = Math.Clamp(mois_observation ?? 24, 1, 120);
+        var depuis = DateTime.Today.AddMonths(-mois);
+
+        var typeDemande = (type_tiers ?? "tous").Trim().ToLowerInvariant();
+        var filtres = new List<string>();
+        if (typeDemande.StartsWith("cli")) filtres.Add("c.CT_Type = 0");
+        else if (typeDemande.StartsWith("fou")) filtres.Add("c.CT_Type = 1");
+        else if (typeDemande is not ("" or "tous" or "tout"))
+            throw new ArgumentException($"Type de tiers inconnu : '{type_tiers}'. Valeurs attendues : client, fournisseur, tous.");
+
+        var prm = new Dictionary<string, object?> { ["@depuis"] = depuis, ["@tiers"] = null };
+        if (!string.IsNullOrWhiteSpace(tiers)) { filtres.Add("c.CT_Num = @tiers"); prm["@tiers"] = tiers.Trim(); }
+        if (!string.IsNullOrWhiteSpace(recherche))
+        {
+            filtres.Add("(c.CT_Num LIKE @rech OR c.CT_Intitule LIKE @rech)");
+            prm["@rech"] = $"%{recherche.Trim()}%";
+        }
+        var where = filtres.Count == 0 ? "1 = 1" : string.Join(" AND ", filtres);
+
+        // Le délai observé est calculé à part (agrégat sur F_ECRITUREC) puis rattaché aux tiers retenus :
+        // une sous-requête corrélée relancerait le scan des écritures pour chaque ligne affichée.
+        var rows = await registry.QueryAsync(base_sage,
+            $@"WITH tiers_retenus AS (
+                   SELECT TOP ({n}) c.CT_Num, c.CT_Intitule, c.CT_Type,
+                          r.RT_Condition, r.RT_NbJour,
+                          r.RT_JourTb01, r.RT_JourTb02, r.RT_JourTb03,
+                          r.RT_TRepart, r.RT_VRepart, r.N_Reglement, p.R_Intitule
+                   FROM F_COMPTET c
+                   LEFT JOIN F_REGLEMENTT r ON r.CT_Num = c.CT_Num
+                   LEFT JOIN P_REGLEMENT p ON p.cbIndice = r.N_Reglement
+                   WHERE {where}
+                   ORDER BY c.CT_Num
+               ),
+               delais_observes AS (
+                   SELECT e.CT_Num,
+                          AVG(CAST(DATEDIFF(day, e.JM_Date, e.EC_Echeance) AS float)) AS DelaiMoyen,
+                          MAX(DATEDIFF(day, e.JM_Date, e.EC_Echeance)) AS DelaiMax,
+                          COUNT(*) AS NbEcheances
+                   FROM F_ECRITUREC e
+                   -- Les à-nouveaux reportent l'échéance d'origine sur la date de report : les
+                   -- inclure produirait des délais négatifs sans rapport avec la pratique du tiers.
+                   WHERE e.EC_Echeance > '19000101' AND e.JM_Date >= @depuis
+                     AND (e.CG_Num LIKE '411%' OR e.CG_Num LIKE '401%')
+                     AND e.EC_ANType = 0
+                     AND (@tiers IS NULL OR e.CT_Num = @tiers)
+                   GROUP BY e.CT_Num
+               )
+               SELECT t.CT_Num, t.CT_Intitule, t.CT_Type, t.RT_Condition, t.RT_NbJour,
+                      t.RT_JourTb01, t.RT_JourTb02, t.RT_JourTb03, t.RT_TRepart, t.RT_VRepart,
+                      t.N_Reglement, t.R_Intitule,
+                      o.DelaiMoyen, o.DelaiMax, o.NbEcheances
+               FROM tiers_retenus t
+               LEFT JOIN delais_observes o ON o.CT_Num = t.CT_Num
+               ORDER BY t.CT_Num", prm, ct);
+
+        if (rows.Count == 0) return "Aucun tiers ne correspond à ces critères.";
+
+        var table = SageFormat.Table(rows,
+            ("Tiers", r => SageFormat.Text(r["CT_Num"])),
+            ("Intitulé", r => SageFormat.Text(r["CT_Intitule"])),
+            ("Type", r => SageFormat.ToLong(r["CT_Type"]) switch { 0 => "Client", 1 => "Fournisseur", 2 => "Salarié", _ => "Autre" }),
+            ("Conditions de règlement", ConditionReglement),
+            ("Mode de règlement", r => string.IsNullOrWhiteSpace(SageFormat.Text(r["R_Intitule"]))
+                ? (r["N_Reglement"] is null ? "—" : $"Mode {SageFormat.ToLong(r["N_Reglement"])}")
+                : SageFormat.Text(r["R_Intitule"])),
+            ("Répartition", Repartition),
+            ("Délai observé", r => r["NbEcheances"] is null
+                ? "—"
+                : $"{SageFormat.ToDecimal(r["DelaiMoyen"]).ToString("N0", SageFormat.Fr)} j " +
+                  $"(max {SageFormat.ToLong(r["DelaiMax"])} j, {SageFormat.ToLong(r["NbEcheances"])} éch.)"));
+
+        var sansParametrage = rows.Count(r => r["RT_Condition"] is null);
+        var sb = new StringBuilder("## Conditions de règlement par tiers\n\n");
+        sb.Append(table);
+        sb.AppendLine($"\n**{rows.Count} tiers affiché(s)**" +
+                      (sansParametrage > 0 ? $" — dont {sansParametrage} sans conditions paramétrées dans F_REGLEMENTT." : "."));
+        sb.AppendLine($"\n*Délai observé : écart moyen entre la date de pièce et la date d'échéance des écritures " +
+                      $"clients (411) et fournisseurs (401) depuis le {depuis:dd/MM/yyyy} — c'est la pratique réelle, " +
+                      $"pas le paramétrage.*");
+        return sb.ToString();
+    }
+
+    /// <summary>Traduit une ligne de F_REGLEMENTT en conditions de règlement lisibles.</summary>
+    private static string ConditionReglement(IReadOnlyDictionary<string, object?> r)
+    {
+        if (r["RT_Condition"] is null) return "Non paramétré";
+
+        var nbJour = SageFormat.ToLong(r["RT_NbJour"]);
+        var libelle = SageFormat.ToLong(r["RT_Condition"]) switch
+        {
+            0 => nbJour <= 0 ? "Comptant" : $"{nbJour} jours nets",
+            1 => $"{nbJour} jours fin de mois",
+            2 => $"{nbJour} jours fin de mois civil",
+            var autre => $"Condition {autre} — {nbJour} jours"
+        };
+
+        // Jours de tombée : l'échéance calculée est reportée au prochain de ces jours du mois.
+        var tombees = new[] { r["RT_JourTb01"], r["RT_JourTb02"], r["RT_JourTb03"] }
+            .Select(SageFormat.ToLong).Where(j => j > 0).ToArray();
+        if (tombees.Length > 0) libelle += ", tombée le " + string.Join(" / ", tombees);
+        return libelle;
+    }
+
+    /// <summary>Part de la facture couverte par cette ligne d'échéance (pourcentage ou solde).</summary>
+    private static string Repartition(IReadOnlyDictionary<string, object?> r)
+    {
+        if (r["RT_TRepart"] is null) return "—";
+        return SageFormat.ToLong(r["RT_TRepart"]) switch
+        {
+            0 => $"{SageFormat.ToDecimal(r["RT_VRepart"]).ToString("N2", SageFormat.Fr)} %",
+            1 => "Solde",
+            var autre => $"Type {autre}"
+        };
     }
 }

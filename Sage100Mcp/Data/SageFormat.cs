@@ -32,6 +32,10 @@ public static class SageFormat
     public static string Date(object? value)
         => value is DateTime dt ? dt.ToString("dd/MM/yyyy", Fr) : value?.ToString() ?? "";
 
+    /// <summary>Date « optionnelle » : « — » si absente ou laissée à la date plancher Sage (01/01/1753).</summary>
+    public static string DateOpt(object? value)
+        => value is DateTime dt && dt.Year >= 1900 ? dt.ToString("dd/MM/yyyy", Fr) : "—";
+
     public static string Text(object? value) => value?.ToString()?.Trim() ?? "";
 
     public static readonly string[] MonthsFr =

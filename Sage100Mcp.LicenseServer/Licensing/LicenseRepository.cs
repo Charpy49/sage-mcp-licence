@@ -9,14 +9,7 @@ public sealed class LicenseRepository
 
     public LicenseRepository(IConfiguration configuration)
     {
-        var dbPath = configuration["Licensing:DatabasePath"] ?? "licenses.db";
-        if (!Path.IsPathRooted(dbPath))
-        {
-            dbPath = Path.Combine(AppContext.BaseDirectory, dbPath);
-        }
-        Directory.CreateDirectory(Path.GetDirectoryName(dbPath)!);
-        _connectionString = new SqliteConnectionStringBuilder { DataSource = dbPath }.ToString();
-
+        _connectionString = SqlitePaths.ResolveConnectionString(configuration);
         EnsureSchema();
     }
 
@@ -40,6 +33,12 @@ public sealed class LicenseRepository
             );
             """;
         cmd.ExecuteNonQuery();
+
+        // Migration des bases déjà déployées : colonnes de politique de mise à jour et d'inventaire.
+        SqlitePaths.EnsureColumn(connection, "Licenses", "UpdateChannel", "TEXT NOT NULL DEFAULT 'stable'");
+        SqlitePaths.EnsureColumn(connection, "Licenses", "PinnedVersion", "TEXT NULL");
+        SqlitePaths.EnsureColumn(connection, "Licenses", "LastInstalledVersion", "TEXT NULL");
+        SqlitePaths.EnsureColumn(connection, "Licenses", "LastTransport", "TEXT NULL");
     }
 
     private SqliteConnection Open()
@@ -118,15 +117,50 @@ public sealed class LicenseRepository
         return results;
     }
 
-    public async Task RecordValidationAsync(string id, string? remoteIp, CancellationToken ct)
+    /// <summary>
+    /// Trace la validation et met à jour l'inventaire. <paramref name="installedVersion"/> et
+    /// <paramref name="transport"/> sont conservés tels quels quand le client ne les fournit pas
+    /// (clients antérieurs à la gestion des mises à jour).
+    /// </summary>
+    public async Task RecordValidationAsync(string id, string? remoteIp, string? installedVersion, string? transport,
+        CancellationToken ct)
     {
         using var connection = Open();
         using var cmd = connection.CreateCommand();
-        cmd.CommandText = "UPDATE Licenses SET LastValidatedAtUtc = $now, LastValidatedIp = $ip WHERE Id = $id";
+        cmd.CommandText =
+            """
+            UPDATE Licenses SET
+                LastValidatedAtUtc = $now,
+                LastValidatedIp = $ip,
+                LastInstalledVersion = COALESCE($version, LastInstalledVersion),
+                LastTransport = COALESCE($transport, LastTransport)
+            WHERE Id = $id
+            """;
         cmd.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToString("O"));
         cmd.Parameters.AddWithValue("$ip", (object?)remoteIp ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$version", (object?)installedVersion ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$transport", (object?)transport ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$id", id);
         await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    /// <summary>Définit le canal et l'épinglage de version d'une licence.</summary>
+    public async Task<bool> SetUpdatePolicyAsync(string id, string? updateChannel, string? pinnedVersion,
+        bool clearPinnedVersion, CancellationToken ct)
+    {
+        var existing = await FindByIdAsync(id, ct);
+        if (existing is null) return false;
+
+        var effectivePin = clearPinnedVersion ? null : (pinnedVersion ?? existing.PinnedVersion);
+
+        using var connection = Open();
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = "UPDATE Licenses SET UpdateChannel = $channel, PinnedVersion = $pin WHERE Id = $id";
+        cmd.Parameters.AddWithValue("$channel",
+            string.IsNullOrWhiteSpace(updateChannel) ? existing.UpdateChannel : updateChannel.Trim());
+        cmd.Parameters.AddWithValue("$pin", (object?)effectivePin ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$id", id);
+        return await cmd.ExecuteNonQueryAsync(ct) > 0;
     }
 
     public async Task<bool> UpdateAsync(string id, string? clientName, DateTimeOffset? expiresAtUtc,
@@ -189,6 +223,10 @@ public sealed class LicenseRepository
             CreatedAtUtc = DateTimeOffset.Parse((string)reader["CreatedAtUtc"]),
             LastValidatedAtUtc = reader["LastValidatedAtUtc"] as string is { } lv ? DateTimeOffset.Parse(lv) : null,
             LastValidatedIp = reader["LastValidatedIp"] as string,
+            UpdateChannel = reader["UpdateChannel"] as string ?? ReleaseRepository.DefaultChannel,
+            PinnedVersion = reader["PinnedVersion"] as string,
+            LastInstalledVersion = reader["LastInstalledVersion"] as string,
+            LastTransport = reader["LastTransport"] as string,
         };
     }
 }

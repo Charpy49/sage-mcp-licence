@@ -362,4 +362,175 @@ public sealed class PilotageTools
         }
         return sb.ToString();
     }
+
+    [McpServerTool(Name = "sage_commandes_clients_detail")]
+    [Description("Détail ligne à ligne des commandes clients (F_DOCENTETE + F_DOCLIGNE) : numéro de pièce, date de " +
+                 "commande, date de livraison prévue, client, statut, article, quantité et montant HT. " +
+                 "Complète sage_commandes_clients_en_cours, qui ne renvoie qu'un total par client. " +
+                 "Filtrable par client, par pièce, par période de commande et par date de livraison prévue.")]
+    public static async Task<string> CommandesClientsDetail(
+        SageDatabaseRegistry registry,
+        [Description("Numéro de compte client (ex. 'GC001232'). Vide = tous les clients.")] string? client = null,
+        [Description("Numéro de pièce de la commande. Vide = toutes les commandes.")] string? piece = null,
+        [Description("Commandes passées à partir du AAAA-MM-JJ (vide = pas de limite).")] string? date_debut = null,
+        [Description("Commandes passées jusqu'au AAAA-MM-JJ (vide = pas de limite).")] string? date_fin = null,
+        [Description("Livraison prévue au plus tard le AAAA-MM-JJ (vide = pas de limite).")] string? livraison_avant = null,
+        [Description("true pour inclure les commandes soldées/clôturées (défaut false : uniquement l'en-cours).")] bool? inclure_soldees = null,
+        [Description("false pour une ligne par commande au lieu d'une ligne par article (défaut true).")] bool? detail_lignes = null,
+        [Description("Nombre maximum de commandes retenues (défaut 50, maximum 500). En mode détaillé, toutes les lignes de ces commandes sont affichées.")] int? limite = null,
+        [Description("Nom de la base Sage (vide = base par défaut).")] string? base_sage = null,
+        CancellationToken ct = default)
+    {
+        var n = Math.Clamp(limite ?? 50, 1, 500);
+        var parLigne = detail_lignes ?? true;
+
+        var filtres = new List<string> { "d.DO_Domaine = 0", "d.DO_Type = 1" };
+        if (inclure_soldees != true) filtres.Add("d.DO_Cloture = 0");
+        var prm = new Dictionary<string, object?>();
+        if (!string.IsNullOrWhiteSpace(client)) { filtres.Add("d.DO_Tiers = @client"); prm["@client"] = client.Trim(); }
+        if (!string.IsNullOrWhiteSpace(piece)) { filtres.Add("d.DO_Piece = @piece"); prm["@piece"] = piece.Trim(); }
+        if (!string.IsNullOrWhiteSpace(date_debut)) { filtres.Add("d.DO_Date >= @from"); prm["@from"] = SagePeriod.ParseDate(date_debut, DateTime.Today); }
+        if (!string.IsNullOrWhiteSpace(date_fin)) { filtres.Add("d.DO_Date <= @to"); prm["@to"] = SagePeriod.ParseDate(date_fin, DateTime.Today).AddDays(1).AddTicks(-1); }
+        if (!string.IsNullOrWhiteSpace(livraison_avant))
+        {
+            // Une date de livraison non renseignée reste à la date plancher Sage : on l'exclut du filtre.
+            filtres.Add("d.DO_DateLivr > '19000101' AND d.DO_DateLivr <= @livr");
+            prm["@livr"] = SagePeriod.ParseDate(livraison_avant, DateTime.Today).AddDays(1).AddTicks(-1);
+        }
+        var where = string.Join(" AND ", filtres);
+
+        // Les commandes sans date de livraison renseignée sont rejetées en fin de liste plutôt qu'en tête.
+        const string ordre = "CASE WHEN d.DO_DateLivr IS NULL OR d.DO_DateLivr < '19000101' THEN 1 ELSE 0 END, " +
+                             "d.DO_DateLivr, d.DO_Piece";
+
+        var commandes = await registry.QueryAsync(base_sage,
+            $@"SELECT TOP ({n}) d.DO_Piece, d.DO_Date, d.DO_Ref, d.DO_Tiers, c.CT_Intitule,
+                      d.DO_Statut, d.DO_Cloture, d.DO_DateLivr, d.DO_TotalHT
+               FROM F_DOCENTETE d
+               LEFT JOIN F_COMPTET c ON c.CT_Num = d.DO_Tiers
+               WHERE {where}
+               ORDER BY {ordre}", prm, ct);
+
+        if (commandes.Count == 0) return "Aucune commande client ne correspond à ces critères.";
+
+        var totaux = await registry.QueryAsync(base_sage,
+            $@"SELECT COUNT(*) AS NbCmd, SUM(d.DO_TotalHT) AS TotalHT
+               FROM F_DOCENTETE d
+               WHERE {where}", prm, ct);
+        var nbTotal = SageFormat.ToLong(totaux[0]["NbCmd"]);
+        var montantTotal = SageFormat.ToDecimal(totaux[0]["TotalHT"]);
+
+        // Les index Sage sur les pièces portent sur cbDO_Piece, colonne calculée *non persistée* :
+        // SQL Server sait s'en servir pour un « DO_Piece = … » mais pas pour joindre F_DOCENTETE à
+        // F_DOCLIGNE (1,4 M lignes), où le plan dégénère en balayage complet. D'où la lecture des
+        // lignes en second temps, par liste de pièces.
+        var pieces = commandes.Select(r => SageFormat.Text(r["DO_Piece"]))
+                              .Where(p => p.Length > 0).Distinct().ToList();
+        var prmLignes = new Dictionary<string, object?>();
+        for (var i = 0; i < pieces.Count; i++) prmLignes[$"@p{i}"] = pieces[i];
+        var listePieces = string.Join(", ", prmLignes.Keys);
+
+        var lignes = pieces.Count == 0
+            ? Array.Empty<IReadOnlyDictionary<string, object?>>()
+            : await registry.QueryAsync(base_sage,
+                parLigne
+                    ? $@"SELECT l.DO_Piece, l.DL_Ligne, l.AR_Ref, l.DL_Design, l.DL_Qte,
+                                l.DL_MontantHT, l.DO_DateLivr
+                         FROM F_DOCLIGNE l
+                         WHERE l.DO_Domaine = 0 AND l.DO_Type = 1 AND l.DO_Piece IN ({listePieces})
+                         ORDER BY l.DO_Piece, l.DL_Ligne"
+                    : $@"SELECT l.DO_Piece, COUNT(*) AS NbLignes
+                         FROM F_DOCLIGNE l
+                         WHERE l.DO_Domaine = 0 AND l.DO_Type = 1 AND l.DO_Piece IN ({listePieces})
+                         GROUP BY l.DO_Piece",
+                prmLignes, ct);
+
+        var lignesParPiece = lignes.GroupBy(r => SageFormat.Text(r["DO_Piece"]))
+                                   .ToDictionary(g => g.Key, g => g.ToList());
+
+        var affichees = new List<IReadOnlyDictionary<string, object?>>();
+        decimal totalAffiche = 0;
+        foreach (var cmd in commandes)
+        {
+            var numeroPiece = SageFormat.Text(cmd["DO_Piece"]);
+            lignesParPiece.TryGetValue(numeroPiece, out var sesLignes);
+
+            if (!parLigne)
+            {
+                var ligneCmd = new Dictionary<string, object?>(cmd, StringComparer.OrdinalIgnoreCase)
+                {
+                    ["_Livraison"] = cmd["DO_DateLivr"],
+                    ["_Montant"] = cmd["DO_TotalHT"],
+                    ["_NbLignes"] = sesLignes is null ? 0L : SageFormat.ToLong(sesLignes[0]["NbLignes"])
+                };
+                totalAffiche += SageFormat.ToDecimal(cmd["DO_TotalHT"]);
+                affichees.Add(ligneCmd);
+                continue;
+            }
+
+            if (sesLignes is null) continue;
+            foreach (var l in sesLignes)
+            {
+                // La date de livraison de la ligne prime : elle peut différer de l'entête (livraison partielle).
+                var livraison = l["DO_DateLivr"] is DateTime dl && dl.Year >= 1900 ? l["DO_DateLivr"] : cmd["DO_DateLivr"];
+                affichees.Add(new Dictionary<string, object?>(cmd, StringComparer.OrdinalIgnoreCase)
+                {
+                    ["_Livraison"] = livraison,
+                    ["_Montant"] = l["DL_MontantHT"],
+                    ["AR_Ref"] = l["AR_Ref"],
+                    ["DL_Design"] = l["DL_Design"],
+                    ["DL_Qte"] = l["DL_Qte"]
+                });
+                totalAffiche += SageFormat.ToDecimal(l["DL_MontantHT"]);
+            }
+        }
+
+        if (affichees.Count == 0) return "Les commandes trouvées ne comportent aucune ligne d'article.";
+
+        var colonnes = new List<(string, Func<IReadOnlyDictionary<string, object?>, string>)>
+        {
+            ("Pièce", r => SageFormat.Text(r["DO_Piece"])),
+            ("Commande", r => SageFormat.DateOpt(r["DO_Date"])),
+            ("Livraison", r => SageFormat.DateOpt(r["_Livraison"])),
+            ("Client", r => SageFormat.Text(r["DO_Tiers"])),
+            ("Intitulé", r => SageFormat.Text(r["CT_Intitule"])),
+            ("Statut", r => StatutCommande(r["DO_Statut"], r["DO_Cloture"]))
+        };
+        if (parLigne)
+        {
+            colonnes.Add(("Article", r => SageFormat.Text(r["AR_Ref"])));
+            colonnes.Add(("Désignation", r => SageFormat.Text(r["DL_Design"])));
+            colonnes.Add(("Qté", r => SageFormat.ToDecimal(r["DL_Qte"]).ToString("N2", SageFormat.Fr)));
+        }
+        else
+        {
+            colonnes.Add(("Réf.", r => SageFormat.Text(r["DO_Ref"])));
+            colonnes.Add(("Lignes", r => SageFormat.ToLong(r["_NbLignes"]).ToString()));
+        }
+        colonnes.Add(("Montant HT", r => SageFormat.Euro(r["_Montant"])));
+
+        var titre = parLigne ? "Détail des lignes de commandes clients" : "Commandes clients (une ligne par commande)";
+        var sb = new StringBuilder($"## {titre}\n\n");
+        sb.Append(SageFormat.Table(affichees, colonnes.ToArray()));
+        sb.AppendLine($"\n**{SageFormat.Euro(totalAffiche)}** sur {commandes.Count} commande(s)" +
+                      (parLigne ? $" ({affichees.Count} ligne(s) d'article)" : "") + ".");
+        if (commandes.Count < nbTotal)
+            sb.AppendLine($"\n*{commandes.Count} commande(s) affichée(s) sur {nbTotal} correspondant aux critères " +
+                          $"({SageFormat.Euro(montantTotal)} au total) : augmentez `limite` ou affinez les filtres.*");
+        return sb.ToString();
+    }
+
+    /// <summary>Libellé du statut d'une commande de vente (énumération Sage DO_Statut) et de sa clôture.</summary>
+    private static string StatutCommande(object? statut, object? cloture)
+    {
+        var libelle = SageFormat.ToLong(statut) switch
+        {
+            0 => "Saisi",
+            1 => "Confirmé",
+            2 => "Accepté",
+            3 => "À traiter",
+            _ => $"Statut {SageFormat.ToLong(statut)}"
+        };
+        return SageFormat.ToLong(cloture) != 0 ? $"{libelle} (soldée)" : libelle;
+    }
 }

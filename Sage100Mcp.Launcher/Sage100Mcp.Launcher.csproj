@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>Sage100Mcp.Launcher</AssemblyName>
+    <RootNamespace>Sage100Mcp.Launcher</RootNamespace>
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <!--
+      Le shim est le point d'entrée stable déclaré dans les clients MCP : il ne doit jamais changer.
+      Sa version n'a donc pas la même portée que celle du serveur — elle ne sert qu'au support.
+    -->
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+
+  <!--
+    AUCUNE dépendance NuGet, volontairement : ce processus s'exécute avant chaque démarrage du
+    serveur MCP. Toute seconde de démarrage et tout conflit de version d'assembly ici se paient
+    à chaque lancement, et une panne du shim rend le serveur entièrement inaccessible.
+  -->
+
+</Project>
