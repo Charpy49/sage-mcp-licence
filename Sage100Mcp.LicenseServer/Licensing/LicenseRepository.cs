@@ -39,6 +39,24 @@ public sealed class LicenseRepository
         SqlitePaths.EnsureColumn(connection, "Licenses", "PinnedVersion", "TEXT NULL");
         SqlitePaths.EnsureColumn(connection, "Licenses", "LastInstalledVersion", "TEXT NULL");
         SqlitePaths.EnsureColumn(connection, "Licenses", "LastTransport", "TEXT NULL");
+
+        // Activation par poste. Les licences existantes passent à 1 poste : le premier qui se
+        // présente avec un client 1.3.0 ou plus récent prend la place.
+        SqlitePaths.EnsureColumn(connection, "Licenses", "MaxMachines", "INTEGER NOT NULL DEFAULT 1");
+
+        using var activations = connection.CreateCommand();
+        activations.CommandText =
+            """
+            CREATE TABLE IF NOT EXISTS LicenseActivations (
+                LicenseId TEXT NOT NULL,
+                MachineId TEXT NOT NULL,
+                MachineName TEXT NULL,
+                ActivatedAtUtc TEXT NOT NULL,
+                LastSeenAtUtc TEXT NOT NULL,
+                PRIMARY KEY (LicenseId, MachineId)
+            );
+            """;
+        activations.ExecuteNonQuery();
     }
 
     private SqliteConnection Open()
@@ -49,7 +67,7 @@ public sealed class LicenseRepository
     }
 
     public async Task<LicenseRecord> CreateAsync(string clientName, string licenseKey, DateTimeOffset expiresAtUtc,
-        IReadOnlyList<string>? allowedTools, CancellationToken ct)
+        IReadOnlyList<string>? allowedTools, int maxMachines, CancellationToken ct)
     {
         var record = new LicenseRecord
         {
@@ -60,6 +78,7 @@ public sealed class LicenseRepository
             AllowedTools = allowedTools,
             ExpiresAtUtc = expiresAtUtc,
             IsRevoked = false,
+            MaxMachines = maxMachines,
             CreatedAtUtc = DateTimeOffset.UtcNow,
         };
 
@@ -67,8 +86,8 @@ public sealed class LicenseRepository
         using var cmd = connection.CreateCommand();
         cmd.CommandText =
             """
-            INSERT INTO Licenses (Id, ClientName, KeyHash, KeyPrefix, AllowedToolsJson, ExpiresAtUtc, IsRevoked, CreatedAtUtc)
-            VALUES ($id, $clientName, $keyHash, $keyPrefix, $allowedTools, $expiresAt, 0, $createdAt);
+            INSERT INTO Licenses (Id, ClientName, KeyHash, KeyPrefix, AllowedToolsJson, ExpiresAtUtc, IsRevoked, MaxMachines, CreatedAtUtc)
+            VALUES ($id, $clientName, $keyHash, $keyPrefix, $allowedTools, $expiresAt, 0, $maxMachines, $createdAt);
             """;
         cmd.Parameters.AddWithValue("$id", record.Id);
         cmd.Parameters.AddWithValue("$clientName", record.ClientName);
@@ -76,6 +95,7 @@ public sealed class LicenseRepository
         cmd.Parameters.AddWithValue("$keyPrefix", record.KeyPrefix);
         cmd.Parameters.AddWithValue("$allowedTools", (object?)Serialize(record.AllowedTools) ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$expiresAt", record.ExpiresAtUtc.ToString("O"));
+        cmd.Parameters.AddWithValue("$maxMachines", record.MaxMachines);
         cmd.Parameters.AddWithValue("$createdAt", record.CreatedAtUtc.ToString("O"));
         await cmd.ExecuteNonQueryAsync(ct);
 
@@ -164,7 +184,8 @@ public sealed class LicenseRepository
     }
 
     public async Task<bool> UpdateAsync(string id, string? clientName, DateTimeOffset? expiresAtUtc,
-        bool? isRevoked, IReadOnlyList<string>? allowedTools, bool clearAllowedTools, CancellationToken ct)
+        bool? isRevoked, IReadOnlyList<string>? allowedTools, bool clearAllowedTools, int? maxMachines,
+        CancellationToken ct)
     {
         var existing = await FindByIdAsync(id, ct);
         if (existing is null) return false;
@@ -181,13 +202,15 @@ public sealed class LicenseRepository
                 ClientName = $clientName,
                 ExpiresAtUtc = $expiresAt,
                 IsRevoked = $isRevoked,
-                AllowedToolsJson = $allowedTools
+                AllowedToolsJson = $allowedTools,
+                MaxMachines = $maxMachines
             WHERE Id = $id
             """;
         cmd.Parameters.AddWithValue("$clientName", clientName ?? existing.ClientName);
         cmd.Parameters.AddWithValue("$expiresAt", (expiresAtUtc ?? existing.ExpiresAtUtc).ToString("O"));
         cmd.Parameters.AddWithValue("$isRevoked", (isRevoked ?? existing.IsRevoked) ? 1 : 0);
         cmd.Parameters.AddWithValue("$allowedTools", (object?)Serialize(effectiveAllowedTools) ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$maxMachines", maxMachines ?? existing.MaxMachines);
         cmd.Parameters.AddWithValue("$id", id);
         var affected = await cmd.ExecuteNonQueryAsync(ct);
         return affected > 0;
@@ -197,10 +220,110 @@ public sealed class LicenseRepository
     {
         using var connection = Open();
         using var cmd = connection.CreateCommand();
-        cmd.CommandText = "DELETE FROM Licenses WHERE Id = $id";
+        cmd.CommandText = "DELETE FROM LicenseActivations WHERE LicenseId = $id; DELETE FROM Licenses WHERE Id = $id";
         cmd.Parameters.AddWithValue("$id", id);
         var affected = await cmd.ExecuteNonQueryAsync(ct);
         return affected > 0;
+    }
+
+    // --- Activation par poste ---
+
+    /// <summary>
+    /// Active la licence sur un poste, ou rafraîchit une activation existante. Seuls les
+    /// <see cref="LicenseRecord.MaxMachines"/> postes activés les premiers sont acceptés : abaisser le
+    /// quota écarte donc les derniers arrivés, sans effacer la trace de leur activation.
+    /// La transaction (BEGIN IMMEDIATE) sérialise les activations concurrentes : deux postes neufs
+    /// qui se présentent en même temps ne peuvent pas prendre tous deux la dernière place.
+    /// </summary>
+    /// <returns>Le poste est-il accepté, et quels postes occupent les places autorisées.</returns>
+    public async Task<(bool Accepted, IReadOnlyList<ActivationRecord> Active)> ActivateAsync(
+        LicenseRecord license, string machineId, string? machineName, CancellationToken ct)
+    {
+        using var connection = Open();
+        using var transaction = connection.BeginTransaction(deferred: false);
+
+        var all = await ListActivationsAsync(connection, license, ct);
+        var active = all.Where(a => a.IsActive).ToList();
+
+        using var cmd = connection.CreateCommand();
+        cmd.Parameters.AddWithValue("$licenseId", license.Id);
+        cmd.Parameters.AddWithValue("$machineId", machineId);
+        cmd.Parameters.AddWithValue("$machineName", (object?)machineName ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToString("O"));
+
+        bool accepted;
+        if (all.FirstOrDefault(a => a.MachineId == machineId) is { } known)
+        {
+            accepted = known.IsActive;
+            cmd.CommandText =
+                """
+                UPDATE LicenseActivations SET LastSeenAtUtc = $now, MachineName = COALESCE($machineName, MachineName)
+                WHERE LicenseId = $licenseId AND MachineId = $machineId
+                """;
+        }
+        else if (active.Count < license.MaxMachines)
+        {
+            accepted = true;
+            cmd.CommandText =
+                """
+                INSERT INTO LicenseActivations (LicenseId, MachineId, MachineName, ActivatedAtUtc, LastSeenAtUtc)
+                VALUES ($licenseId, $machineId, $machineName, $now, $now)
+                """;
+        }
+        else
+        {
+            // Poste refusé : il n'est pas enregistré, sinon chaque tentative laisserait une trace à nettoyer.
+            return (false, active);
+        }
+
+        await cmd.ExecuteNonQueryAsync(ct);
+        transaction.Commit();
+        return (accepted, active);
+    }
+
+    public async Task<IReadOnlyList<ActivationRecord>> ListActivationsAsync(LicenseRecord license, CancellationToken ct)
+    {
+        using var connection = Open();
+        return await ListActivationsAsync(connection, license, ct);
+    }
+
+    /// <summary>Postes de la licence, du plus ancien au plus récent ; seuls les MaxMachines premiers sont actifs.</summary>
+    private static async Task<IReadOnlyList<ActivationRecord>> ListActivationsAsync(SqliteConnection connection,
+        LicenseRecord license, CancellationToken ct)
+    {
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText =
+            "SELECT * FROM LicenseActivations WHERE LicenseId = $licenseId ORDER BY ActivatedAtUtc, MachineId";
+        cmd.Parameters.AddWithValue("$licenseId", license.Id);
+        using var reader = await cmd.ExecuteReaderAsync(ct);
+
+        var results = new List<ActivationRecord>();
+        while (await reader.ReadAsync(ct))
+        {
+            results.Add(new ActivationRecord(
+                (string)reader["MachineId"],
+                reader["MachineName"] as string,
+                DateTimeOffset.Parse((string)reader["ActivatedAtUtc"]),
+                DateTimeOffset.Parse((string)reader["LastSeenAtUtc"]),
+                IsActive: results.Count < license.MaxMachines));
+        }
+        return results;
+    }
+
+    /// <summary>
+    /// Libère un poste (changement de PC, réinstallation de Windows), ou tous les postes de la licence
+    /// si <paramref name="machineId"/> est null. Renvoie le nombre d'activations supprimées.
+    /// </summary>
+    public async Task<int> DeactivateAsync(string licenseId, string? machineId, CancellationToken ct)
+    {
+        using var connection = Open();
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = machineId is null
+            ? "DELETE FROM LicenseActivations WHERE LicenseId = $licenseId"
+            : "DELETE FROM LicenseActivations WHERE LicenseId = $licenseId AND MachineId = $machineId";
+        cmd.Parameters.AddWithValue("$licenseId", licenseId);
+        if (machineId is not null) cmd.Parameters.AddWithValue("$machineId", machineId);
+        return await cmd.ExecuteNonQueryAsync(ct);
     }
 
     private static string? Serialize(IReadOnlyList<string>? allowedTools) =>
@@ -220,6 +343,7 @@ public sealed class LicenseRepository
                 : JsonSerializer.Deserialize<List<string>>(allowedToolsJson),
             ExpiresAtUtc = DateTimeOffset.Parse((string)reader["ExpiresAtUtc"]),
             IsRevoked = Convert.ToInt64(reader["IsRevoked"]) != 0,
+            MaxMachines = Convert.ToInt32(reader["MaxMachines"]),
             CreatedAtUtc = DateTimeOffset.Parse((string)reader["CreatedAtUtc"]),
             LastValidatedAtUtc = reader["LastValidatedAtUtc"] as string is { } lv ? DateTimeOffset.Parse(lv) : null,
             LastValidatedIp = reader["LastValidatedIp"] as string,

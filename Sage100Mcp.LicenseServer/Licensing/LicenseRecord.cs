@@ -12,6 +12,9 @@ public sealed class LicenseRecord
 
     public required DateTimeOffset ExpiresAtUtc { get; set; }
     public bool IsRevoked { get; set; }
+
+    /// <summary>Nombre de postes pouvant activer la licence (voir <see cref="LicenseRepository.ActivateAsync"/>).</summary>
+    public int MaxMachines { get; set; } = 1;
     public required DateTimeOffset CreatedAtUtc { get; init; }
     public DateTimeOffset? LastValidatedAtUtc { get; set; }
     public string? LastValidatedIp { get; set; }

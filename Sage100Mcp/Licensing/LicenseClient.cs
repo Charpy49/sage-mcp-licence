@@ -67,6 +67,19 @@ public static class LicenseClient
 
         var keyHash = HashKey(options.LicenseKey);
 
+        MachineIdentity machine;
+        try
+        {
+            machine = MachineIdentity.Current();
+        }
+        catch (Exception ex)
+        {
+            return LicenseValidationResult.Fail($"Impossible d'identifier ce poste pour la licence : {ex.Message}");
+        }
+
+        // Nonce : le jeton renvoyé doit le reprendre, ce qui interdit de rejouer en ligne un ancien jeton.
+        var nonce = RandomNumberGenerator.GetHexString(32);
+
         try
         {
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(options.TimeoutSeconds) };
@@ -75,12 +88,15 @@ public static class LicenseClient
             {
                 licenseKey = options.LicenseKey,
                 installedVersion = AppVersion.Current,
-                transport
+                transport,
+                machineId = machine.Id,
+                machineName = machine.Name,
+                nonce
             }, ct);
 
             if (!response.IsSuccessStatusCode)
             {
-                return FallBackToCache(options, keyHash,
+                return FallBackToCache(options, keyHash, machine,
                     $"Le serveur de licences a répondu {(int)response.StatusCode}.");
             }
 
@@ -89,7 +105,7 @@ public static class LicenseClient
 
             if (payload is null)
             {
-                return FallBackToCache(options, keyHash, "Réponse du serveur de licences illisible.");
+                return FallBackToCache(options, keyHash, machine, "Réponse du serveur de licences illisible.");
             }
 
             if (!payload.Valid)
@@ -97,51 +113,78 @@ public static class LicenseClient
                 return LicenseValidationResult.Fail(DescribeRejection(payload));
             }
 
-            var clientName = payload.ClientName ?? "client";
-            WriteCache(new LicenseCacheEntry
+            // Une réponse « valide » ne vaut rien sans jeton signé qui la confirme pour ce poste et cette requête.
+            var token = LicenseToken.Verify(payload.Token, payload.TokenSignature);
+            if (token is null)
             {
-                LicenseKeyHash = keyHash,
-                ClientName = clientName,
-                ExpiresAtUtc = payload.ExpiresAtUtc ?? DateTimeOffset.UtcNow.AddDays(1),
-                AllowedTools = payload.AllowedTools,
-                ValidatedAtUtc = DateTimeOffset.UtcNow,
-            });
+                return LicenseValidationResult.Fail(payload.Token is null
+                    ? "Le serveur de licences n'a pas renvoyé de jeton signé (serveur non à jour ou usurpé)."
+                    : "Jeton de licence à la signature invalide : vérifiez License:ServerUrl.");
+            }
+            if (token.LicenseKeyHash != keyHash || token.MachineId != machine.Id || token.Nonce != nonce)
+            {
+                return LicenseValidationResult.Fail(
+                    "Jeton de licence émis pour une autre clé, un autre poste ou une autre requête : démarrage refusé.");
+            }
 
-            return LicenseValidationResult.Ok(clientName, payload.AllowedTools, payload.Update);
+            WriteCache(new LicenseCacheEntry { Token = payload.Token, TokenSignature = payload.TokenSignature });
+
+            return LicenseValidationResult.Ok(token.ClientName, token.AllowedTools, payload.Update);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
         {
-            return FallBackToCache(options, keyHash, $"Serveur de licences injoignable ({ex.Message}).");
+            return FallBackToCache(options, keyHash, machine, $"Serveur de licences injoignable ({ex.Message}).");
         }
     }
 
-    private static LicenseValidationResult FallBackToCache(LicenseOptions options, string keyHash, string reason)
+    /// <summary>Tolérance sur l'horloge du poste, en retard sur celle du serveur de licences.</summary>
+    private static readonly TimeSpan ClockSkew = TimeSpan.FromHours(1);
+
+    private static LicenseValidationResult FallBackToCache(LicenseOptions options, string keyHash,
+        MachineIdentity machine, string reason)
     {
         var cache = ReadCache();
-        if (cache is null || cache.LicenseKeyHash != keyHash)
+        var token = LicenseToken.Verify(cache?.Token, cache?.TokenSignature);
+        if (token is null || token.LicenseKeyHash != keyHash)
         {
             return LicenseValidationResult.Fail(
                 $"{reason} Aucune validation de licence récente en cache pour démarrer en mode dégradé.");
         }
 
-        var graceDeadline = cache.ValidatedAtUtc.AddDays(options.GracePeriodDays);
-        if (DateTimeOffset.UtcNow > graceDeadline)
+        if (token.MachineId != machine.Id)
         {
             return LicenseValidationResult.Fail(
-                $"{reason} La dernière validation en cache date de plus de {options.GracePeriodDays} jour(s) " +
+                $"{reason} Le cache de licence a été émis pour un autre poste : reconnectez ce poste au serveur de licences.");
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        if (now < token.IssuedAtUtc - ClockSkew)
+        {
+            return LicenseValidationResult.Fail(
+                $"{reason} L'horloge de ce poste est antérieure à la dernière validation ({token.IssuedAtUtc:u}) : " +
+                "corrigez la date système.");
+        }
+
+        // Le plus strict des deux : la tolérance fixée par le serveur (signée) et celle de la configuration locale.
+        var graceDeadline = token.IssuedAtUtc.AddDays(options.GracePeriodDays);
+        if (token.OfflineUntilUtc < graceDeadline) graceDeadline = token.OfflineUntilUtc;
+        if (now > graceDeadline)
+        {
+            return LicenseValidationResult.Fail(
+                $"{reason} La dernière validation en cache date du {token.IssuedAtUtc:u} " +
                 "(période de tolérance dépassée) : reconnectez ce poste au serveur de licences.");
         }
 
-        if (DateTimeOffset.UtcNow > cache.ExpiresAtUtc)
+        if (now > token.ExpiresAtUtc)
         {
             return LicenseValidationResult.Fail($"{reason} La licence en cache est expirée.");
         }
 
         Console.Error.WriteLine(
             $"[Licence] {reason} Démarrage en mode dégradé avec la dernière validation connue " +
-            $"({cache.ValidatedAtUtc:u}, tolérance {options.GracePeriodDays} jour(s)).");
+            $"({token.IssuedAtUtc:u}, acceptée jusqu'au {graceDeadline:u}).");
 
-        return LicenseValidationResult.Ok(cache.ClientName, cache.AllowedTools);
+        return LicenseValidationResult.Ok(token.ClientName, token.AllowedTools);
     }
 
     private static string DescribeRejection(ValidateResponseDto payload) => payload.Reason switch
@@ -150,6 +193,11 @@ public static class LicenseClient
         "revoked" => $"Licence révoquée pour {payload.ClientName ?? "ce client"}.",
         "expired" => $"Licence expirée le {payload.ExpiresAtUtc:d} pour {payload.ClientName ?? "ce client"}.",
         "missing_key" => "Aucune clé de licence transmise.",
+        "machine_limit" =>
+            $"Licence de {payload.ClientName ?? "ce client"} déjà activée sur {payload.MaxMachines ?? 1} poste(s) " +
+            $"({string.Join(", ", payload.ActivatedMachines ?? [])}) : ce poste ({Environment.MachineName}) n'est pas autorisé. " +
+            "Demandez à votre fournisseur de libérer un poste ou d'étendre la licence.",
+        "missing_machine_id" => "Le serveur de licences exige l'identification du poste : mettez à jour le serveur MCP.",
         _ => $"Licence refusée par le serveur ({payload.Reason ?? "raison inconnue"}).",
     };
 
@@ -193,5 +241,13 @@ public static class LicenseClient
 
         /// <summary>Absent des réponses des serveurs de licences antérieurs à la gestion des mises à jour.</summary>
         public UpdateInfo? Update { get; set; }
+
+        /// <summary>Jeton signé (voir <see cref="LicenseToken"/>) ; seule source de vérité sur la licence.</summary>
+        public string? Token { get; set; }
+        public string? TokenSignature { get; set; }
+
+        /// <summary>Renseignés sur un refus <c>machine_limit</c>.</summary>
+        public IReadOnlyList<string>? ActivatedMachines { get; set; }
+        public int? MaxMachines { get; set; }
     }
 }

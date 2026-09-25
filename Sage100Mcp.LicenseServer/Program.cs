@@ -3,12 +3,38 @@ using System.Text;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Sage100Mcp.LicenseServer.Licensing;
 
+// Outil ponctuel : génère la paire de clés de signature des licences, puis s'arrête.
+//   dotnet run -- generate-signing-key
+if (args is ["generate-signing-key"])
+{
+    var (privateKey, publicKeyPem) = LicenseSigner.GenerateKeyPair();
+    Console.WriteLine("Clé PRIVÉE — à mettre dans Licensing__SigningKey du serveur de licences, et nulle part ailleurs :");
+    Console.WriteLine(privateKey);
+    Console.WriteLine();
+    Console.WriteLine("Clé PUBLIQUE — à recopier dans PublicKeyPem de Sage100Mcp/Licensing/LicenseToken.cs :");
+    Console.WriteLine(publicKeyPem);
+    return;
+}
+
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddSingleton<LicenseRepository>();
 builder.Services.AddSingleton<ReleaseRepository>();
+builder.Services.AddSingleton<LicenseSigner>();
 
 var app = builder.Build();
+
+// Instanciée dès le démarrage : une clé de signature absente ou invalide doit empêcher le service de
+// démarrer, pas faire échouer la première validation de licence d'un client.
+app.Services.GetRequiredService<LicenseSigner>();
+
+// Transition vers l'activation par poste : tant que des clients antérieurs à la 1.3.0 sont en service,
+// une validation sans empreinte de poste est acceptée (sans jeton signé). À passer à true une fois la
+// 1.3.0 déclarée plancher de version — sinon rester sur une ancienne version suffit à contourner le contrôle.
+var requireMachineId = app.Configuration.GetValue("Licensing:RequireMachineId", false);
+
+// Durée pendant laquelle un jeton reste accepté hors connexion par le client.
+var offlineGraceDays = app.Configuration.GetValue("Licensing:OfflineGraceDays", 7);
 
 // La valeur de remplacement de appsettings.json est publique (le fichier est versionné et le dépôt
 // est sur GitHub) : la refuser explicitement, sinon un déploiement qui oublie de définir
@@ -25,8 +51,8 @@ if (string.IsNullOrWhiteSpace(adminKey) || adminKey == adminKeyPlaceholder)
 
 // --- Endpoint public, appelé par les serveurs MCP déployés chez les clients ---
 app.MapPost("/api/license/validate", async Task<Ok<ValidateResponse>> (
-    ValidateRequest request, LicenseRepository repo, ReleaseRepository releases, HttpContext http,
-    CancellationToken ct) =>
+    ValidateRequest request, LicenseRepository repo, ReleaseRepository releases, LicenseSigner signer,
+    HttpContext http, CancellationToken ct) =>
 {
     if (string.IsNullOrWhiteSpace(request.LicenseKey))
     {
@@ -48,13 +74,49 @@ app.MapPost("/api/license/validate", async Task<Ok<ValidateResponse>> (
             ExpiresAtUtc: license.ExpiresAtUtc));
     }
 
+    var machineId = request.MachineId?.Trim();
+    if (string.IsNullOrEmpty(machineId))
+    {
+        // Client antérieur à la 1.3.0 : il ne sait ni s'identifier ni vérifier un jeton.
+        if (requireMachineId)
+        {
+            return TypedResults.Ok(new ValidateResponse(false, Reason: "missing_machine_id",
+                ClientName: license.ClientName));
+        }
+    }
+    else
+    {
+        if (machineId.Length > 128 || request.Nonce?.Length > 128)
+        {
+            return TypedResults.Ok(new ValidateResponse(false, Reason: "invalid_request"));
+        }
+
+        var machineName = request.MachineName?.Trim() is { Length: > 0 } name ? name[..Math.Min(name.Length, 64)] : null;
+        var (accepted, active) = await repo.ActivateAsync(license, machineId, machineName, ct);
+        if (!accepted)
+        {
+            return TypedResults.Ok(new ValidateResponse(false, Reason: "machine_limit", ClientName: license.ClientName,
+                ActivatedMachines: active.Select(a => a.MachineName ?? "(poste sans nom)").ToList(),
+                MaxMachines: license.MaxMachines));
+        }
+    }
+
     await repo.RecordValidationAsync(license.Id, http.Connection.RemoteIpAddress?.ToString(),
         request.InstalledVersion, request.Transport, ct);
 
     var manifest = UpdateResolver.Resolve(await releases.ListAsync(ct), license.UpdateChannel, license.PinnedVersion);
 
+    string? token = null, signature = null;
+    if (!string.IsNullOrEmpty(machineId))
+    {
+        var now = DateTimeOffset.UtcNow;
+        (token, signature) = signer.Sign(new LicenseToken(1, license.KeyHash, machineId, license.ClientName,
+            license.ExpiresAtUtc, license.AllowedTools, now, now.AddDays(offlineGraceDays), request.Nonce));
+    }
+
     return TypedResults.Ok(new ValidateResponse(true, ClientName: license.ClientName,
-        ExpiresAtUtc: license.ExpiresAtUtc, AllowedTools: license.AllowedTools, Update: manifest));
+        ExpiresAtUtc: license.ExpiresAtUtc, AllowedTools: license.AllowedTools, Update: manifest,
+        Token: token, TokenSignature: signature));
 });
 
 // --- Endpoint public dédié au shim de mise à jour ---
@@ -80,51 +142,86 @@ app.MapPost("/api/version/check", async Task<Results<Ok<UpdateManifest>, Unautho
 // --- Endpoints d'administration, protégés par une clé partagée ---
 var admin = app.MapGroup("/api/admin/licenses").AddEndpointFilter(AdminKeyFilter);
 
-admin.MapPost("/", async Task<Created<CreateLicenseResponse>> (
+admin.MapPost("/", async Task<Results<Created<CreateLicenseResponse>, BadRequest<string>>> (
     CreateLicenseRequest request, LicenseRepository repo, CancellationToken ct) =>
 {
+    if (request.MaxMachines is < 1) return TypedResults.BadRequest("MaxMachines doit valoir au moins 1.");
+
     var key = LicenseKeyGenerator.Generate();
-    var record = await repo.CreateAsync(request.ClientName, key, request.ExpiresAtUtc, request.AllowedTools, ct);
-    var response = new CreateLicenseResponse(record.Id, key, record.ClientName, record.ExpiresAtUtc, record.AllowedTools);
+    var record = await repo.CreateAsync(request.ClientName, key, request.ExpiresAtUtc, request.AllowedTools,
+        request.MaxMachines ?? 1, ct);
+    var response = new CreateLicenseResponse(record.Id, key, record.ClientName, record.ExpiresAtUtc, record.AllowedTools,
+        record.MaxMachines);
     return TypedResults.Created($"/api/admin/licenses/{record.Id}", response);
 });
 
 admin.MapGet("/", async (LicenseRepository repo, CancellationToken ct) =>
-    (await repo.ListAsync(ct)).Select(LicenseSummary.From));
+{
+    var summaries = new List<LicenseSummary>();
+    foreach (var record in await repo.ListAsync(ct))
+    {
+        summaries.Add(await Summarize(repo, record, ct));
+    }
+    return summaries;
+});
 
 admin.MapGet("/{id}", async Task<Results<Ok<LicenseSummary>, NotFound>> (
     string id, LicenseRepository repo, CancellationToken ct) =>
 {
     var record = await repo.FindByIdAsync(id, ct);
-    return record is null ? TypedResults.NotFound() : TypedResults.Ok(LicenseSummary.From(record));
+    return record is null ? TypedResults.NotFound() : TypedResults.Ok(await Summarize(repo, record, ct));
 });
 
-admin.MapPut("/{id}", async Task<Results<Ok<LicenseSummary>, NotFound>> (
+admin.MapPut("/{id}", async Task<Results<Ok<LicenseSummary>, NotFound, BadRequest<string>>> (
     string id, UpdateLicenseRequest request, LicenseRepository repo, CancellationToken ct) =>
 {
+    if (request.MaxMachines is < 1) return TypedResults.BadRequest("MaxMachines doit valoir au moins 1.");
+
     var updated = await repo.UpdateAsync(id, request.ClientName, request.ExpiresAtUtc, request.IsRevoked,
-        request.AllowedTools, request.ClearAllowedTools ?? false, ct);
+        request.AllowedTools, request.ClearAllowedTools ?? false, request.MaxMachines, ct);
     if (!updated) return TypedResults.NotFound();
     var record = await repo.FindByIdAsync(id, ct);
-    return TypedResults.Ok(LicenseSummary.From(record!));
+    return TypedResults.Ok(await Summarize(repo, record!, ct));
 });
 
 admin.MapPost("/{id}/revoke", async Task<Results<Ok<LicenseSummary>, NotFound>> (
     string id, LicenseRepository repo, CancellationToken ct) =>
 {
-    var updated = await repo.UpdateAsync(id, null, null, isRevoked: true, null, false, ct);
+    var updated = await repo.UpdateAsync(id, null, null, isRevoked: true, null, false, null, ct);
     if (!updated) return TypedResults.NotFound();
     var record = await repo.FindByIdAsync(id, ct);
-    return TypedResults.Ok(LicenseSummary.From(record!));
+    return TypedResults.Ok(await Summarize(repo, record!, ct));
 });
 
 admin.MapPost("/{id}/unrevoke", async Task<Results<Ok<LicenseSummary>, NotFound>> (
     string id, LicenseRepository repo, CancellationToken ct) =>
 {
-    var updated = await repo.UpdateAsync(id, null, null, isRevoked: false, null, false, ct);
+    var updated = await repo.UpdateAsync(id, null, null, isRevoked: false, null, false, null, ct);
     if (!updated) return TypedResults.NotFound();
     var record = await repo.FindByIdAsync(id, ct);
-    return TypedResults.Ok(LicenseSummary.From(record!));
+    return TypedResults.Ok(await Summarize(repo, record!, ct));
+});
+
+// Postes ayant activé la licence. Libérer un poste (changement de PC, réinstallation de Windows,
+// migration de serveur) rend sa place : le prochain poste qui se présente la prend.
+admin.MapGet("/{id}/machines", async Task<Results<Ok<IReadOnlyList<ActivationRecord>>, NotFound>> (
+    string id, LicenseRepository repo, CancellationToken ct) =>
+{
+    var record = await repo.FindByIdAsync(id, ct);
+    return record is null ? TypedResults.NotFound() : TypedResults.Ok(await repo.ListActivationsAsync(record, ct));
+});
+
+admin.MapDelete("/{id}/machines/{machineId}", async Task<Results<NoContent, NotFound>> (
+    string id, string machineId, LicenseRepository repo, CancellationToken ct) =>
+    await repo.DeactivateAsync(id, machineId, ct) > 0 ? TypedResults.NoContent() : TypedResults.NotFound());
+
+admin.MapDelete("/{id}/machines", async Task<Results<Ok<LicenseSummary>, NotFound>> (
+    string id, LicenseRepository repo, CancellationToken ct) =>
+{
+    var record = await repo.FindByIdAsync(id, ct);
+    if (record is null) return TypedResults.NotFound();
+    await repo.DeactivateAsync(id, null, ct);
+    return TypedResults.Ok(await Summarize(repo, record, ct));
 });
 
 admin.MapDelete("/{id}", async Task<Results<NoContent, NotFound>> (
@@ -149,7 +246,7 @@ admin.MapPut("/{id}/update-policy", async Task<Results<Ok<LicenseSummary>, NotFo
     if (!updated) return TypedResults.NotFound();
 
     var record = await repo.FindByIdAsync(id, ct);
-    return TypedResults.Ok(LicenseSummary.From(record!));
+    return TypedResults.Ok(await Summarize(repo, record!, ct));
 });
 
 // --- Administration des versions publiées, même clé partagée ---
@@ -224,6 +321,9 @@ async ValueTask<object?> AdminKeyFilter(EndpointFilterInvocationContext context,
     }
     return await next(context);
 }
+
+static async Task<LicenseSummary> Summarize(LicenseRepository repo, LicenseRecord record, CancellationToken ct) =>
+    LicenseSummary.From(record, await repo.ListActivationsAsync(record, ct));
 
 static bool FixedTimeEquals(string a, string b) =>
     CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(a), Encoding.UTF8.GetBytes(b));

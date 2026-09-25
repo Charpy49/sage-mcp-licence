@@ -19,6 +19,11 @@
 .EXAMPLE
     # Redéployer le code sans toucher aux réglages
     .\deploy-license-server-azure.ps1 -AppName sage-mcp-licences -CodeOnly
+
+.EXAMPLE
+    # Première installation de la clé de signature des licences (ligne 2 du fichier généré par
+    # « dotnet run -- generate-signing-key »)
+    .\deploy-license-server-azure.ps1 -AppName sage-mcp-licences -SigningKey (Get-Content ..\..\secrets\license-signing-key.txt)[1]
 #>
 [CmdletBinding()]
 param(
@@ -34,6 +39,11 @@ param(
 
     # Laisser vide pour en générer une à la création ; ignoré si l'application en a déjà une.
     [string]$AdminKey,
+
+    # Clé privée de signature des licences (PKCS#8 base64). Obligatoire tant que l'application n'en a
+    # pas : sans elle, le serveur refuse de démarrer. Ne la fournir ensuite que pour la remplacer —
+    # ce qui impose d'avoir d'abord diffusé un serveur MCP portant la nouvelle clé publique.
+    [string]$SigningKey,
 
     # Ne redéployer que le code, sans retoucher aux réglages d'application.
     [switch]$CodeOnly
@@ -156,6 +166,22 @@ if (-not $CodeOnly) {
 
     Invoke-Az webapp config appsettings set --name $AppName --resource-group $ResourceGroup `
         --settings $settings --output none
+}
+
+# --- Clé de signature des licences ------------------------------------------------------------
+# Vérifiée avant de publier le code, y compris en -CodeOnly : un serveur sans clé ne démarre pas,
+# et tous les postes clients basculeraient en mode dégradé puis refuseraient de démarrer.
+$appSettings = Invoke-Az webapp config appsettings list --name $AppName --resource-group $ResourceGroup --output json |
+    ConvertFrom-Json
+$hasSigningKey = [bool]($appSettings | Where-Object { $_.name -eq 'Licensing__SigningKey' }).value
+
+if ($SigningKey) {
+    Write-Host "Clé de signature des licences $(if ($hasSigningKey) { 'remplacée' } else { 'installée' })." -ForegroundColor Cyan
+    Invoke-Az webapp config appsettings set --name $AppName --resource-group $ResourceGroup `
+        --settings "Licensing__SigningKey=$SigningKey" --output none
+}
+elseif (-not $hasSigningKey) {
+    throw "L'application n'a pas de Licensing__SigningKey : relancez avec -SigningKey (voir l'exemple dans l'aide du script)."
 }
 
 # --- Publication du code ----------------------------------------------------------------------
