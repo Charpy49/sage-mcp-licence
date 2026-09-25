@@ -77,7 +77,7 @@ if (-not (Test-Path $serverExe)) { throw "Sage100Mcp.exe absent de la publicatio
 # Le shim ne lit de toute façon que celui de la racine d'installation ; ce modèle sert uniquement
 # à amorcer une installation neuve.
 $template = [ordered]@{
-    License = [ordered]@{ ServerUrl = ''; LicenseKey = ''; TimeoutSeconds = 5; GracePeriodDays = 3 }
+    License = [ordered]@{ ServerUrl = ''; LicenseKey = ''; TimeoutSeconds = 30; GracePeriodDays = 7 }
     Update  = [ordered]@{ Enabled = $true; CheckIntervalHours = 4; RequirePublisher = '' }
     Mcp     = [ordered]@{ Http = [ordered]@{ Urls = 'http://127.0.0.1:5099'; EndpointPath = '/mcp'; ApiKeys = @(); AllowedOrigins = @() } }
     Sage    = [ordered]@{ Databases = @([ordered]@{

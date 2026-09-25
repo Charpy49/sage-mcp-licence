@@ -11,11 +11,11 @@ public sealed class LicenseOptions
     public string? LicenseKey { get; set; }
 
     /// <summary>Délai maximal (secondes) accordé à l'appel de validation en ligne avant timeout.</summary>
-    public int TimeoutSeconds { get; set; } = 5;
+    public int TimeoutSeconds { get; set; } = 30;
 
     /// <summary>
     /// Nombre de jours pendant lesquels une licence validée avec succès reste acceptée depuis le cache local
     /// si le serveur de licences est injoignable au démarrage suivant.
     /// </summary>
-    public int GracePeriodDays { get; set; } = 3;
+    public int GracePeriodDays { get; set; } = 7;
 }
