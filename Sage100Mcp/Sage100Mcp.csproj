@@ -12,7 +12,7 @@
       pour l'inventaire du parc, et comparée au manifeste de mise à jour.
       À incrémenter à chaque publication — c'est la clé de tout le mécanisme de mise à jour.
     -->
-    <Version>1.3.0</Version>
+    <Version>1.3.1</Version>
     <InvariantGlobalization>false</InvariantGlobalization>
   </PropertyGroup>
 

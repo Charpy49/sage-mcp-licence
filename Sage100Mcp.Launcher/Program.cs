@@ -14,6 +14,8 @@ using Sage100Mcp.Launcher;
 //  3. Ne jamais empêcher le serveur de démarrer : toute panne du canal de mise à jour (réseau,
 //     licence, signature) se traduit par un avertissement, pas par un échec.
 
+Log.UseUtf8WhenRedirected();
+
 var rootDir = AppContext.BaseDirectory;
 var store = new VersionStore(rootDir);
 
@@ -154,12 +156,17 @@ if (server is null)
 
 // --- Mise à jour en tâche de fond -----------------------------------------------------------
 // Elle s'exécute pendant que le serveur travaille et ne prend effet qu'au lancement suivant.
+//
+// La version est activée (current.txt) dès la fin de l'installation, pas à l'arrêt du serveur :
+// les clients MCP tuent le shim au lieu d'attendre sa sortie, et le code qui suit
+// WaitForExitAsync ne s'exécute alors jamais — l'installation restait indéfiniment inactive.
+// Basculer pendant que le serveur tourne est sans risque : il vit dans son propre dossier de version.
 Task<bool>? backgroundInstall = null;
 if (manifest is not null && VersionStore.IsNewer(manifest.LatestVersion, launchVersion))
 {
     Log.Info($"Version {manifest.LatestVersion} disponible : installation en arrière-plan, " +
              "active au prochain démarrage.");
-    backgroundInstall = InstallExclusiveAsync(store, manifest, config);
+    backgroundInstall = InstallAndActivateAsync(store, manifest, config);
 }
 
 await server.WaitForExitAsync();
@@ -168,6 +175,8 @@ if (backgroundInstall is not null)
 {
     // Le serveur est arrêté : on accorde un dernier délai au téléchargement, sans plus, pour ne
     // pas laisser le client MCP attendre la fin d'un processus qui n'a plus rien à faire.
+    // Seul le ménage des anciennes versions attend l'arrêt (la version qui tournait ne peut pas
+    // être supprimée avant) ; s'il est sauté parce que le shim est tué, il sera refait plus tard.
     // Un échec ici ne doit pas masquer le code de sortie du serveur.
     try
     {
@@ -176,9 +185,7 @@ if (backgroundInstall is not null)
 
         if (completed == backgroundInstall && await backgroundInstall)
         {
-            store.SetCurrent(manifest!.LatestVersion!);
-            store.Prune(config.KeepVersions, manifest.LatestVersion);
-            Log.Info($"Version {manifest.LatestVersion} activée pour le prochain démarrage.");
+            store.Prune(config.KeepVersions, store.ReadCurrent());
         }
         else if (completed != backgroundInstall)
         {
@@ -187,7 +194,7 @@ if (backgroundInstall is not null)
     }
     catch (Exception ex)
     {
-        Log.Error($"Activation de la nouvelle version impossible : {ex.Message}");
+        Log.Error($"Nettoyage des anciennes versions impossible : {ex.Message}");
     }
 }
 
@@ -224,6 +231,29 @@ static async Task<bool> InstallExclusiveAsync(VersionStore store, ReleaseManifes
     catch (Exception ex)
     {
         Log.Error($"Mise à jour interrompue : {ex.Message}");
+        return false;
+    }
+}
+
+// Installe une version en arrière-plan puis l'active aussitôt pour les lancements suivants.
+// Ne lève jamais, comme InstallExclusiveAsync.
+static async Task<bool> InstallAndActivateAsync(VersionStore store, ReleaseManifest manifest, LauncherConfig config)
+{
+    if (!await InstallExclusiveAsync(store, manifest, config)) return false;
+
+    var version = manifest.LatestVersion!;
+    try
+    {
+        // Une autre instance a pu activer entre-temps une version plus récente : ne pas la rétrograder.
+        if (store.ReadCurrent() is { } current && !VersionStore.IsNewer(version, current)) return true;
+
+        store.SetCurrent(version);
+        Log.Info($"Version {version} activée pour le prochain démarrage.");
+        return true;
+    }
+    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+    {
+        Log.Error($"Activation de la version {version} impossible : {ex.Message}");
         return false;
     }
 }

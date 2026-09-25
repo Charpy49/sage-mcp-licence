@@ -1,3 +1,4 @@
+using System.Text;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -17,6 +18,12 @@ using Sage100Mcp.Licensing;
 //
 // Le transport peut aussi être imposé par la variable d'environnement MCP_TRANSPORT=http,
 // utile pour un service Windows dont on ne maîtrise pas la ligne de commande.
+// stderr en UTF-8 quand un client MCP le lit : par défaut .NET encode avec la page de code de la
+// console (850/1252) et les accents des messages de licence arrivaient illisibles. Sans BOM, et
+// uniquement si le flux est redirigé : une vraie console garde son encodage.
+if (Console.IsErrorRedirected)
+    Console.SetError(new StreamWriter(Console.OpenStandardError(), new UTF8Encoding(false)) { AutoFlush = true });
+
 var transport = McpTransportSelection.Resolve(args);
 
 // Nos propres arguments sont retirés avant l'hôte : le fournisseur de configuration en ligne
