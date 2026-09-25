@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Licences Sage 100 MCP</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232f5fd0'/%3E%3Cpath d='M11 14v-3a5 5 0 0 1 10 0v3' stroke='white' stroke-width='2.5' fill='none'/%3E%3Crect x='8' y='14' width='16' height='11' rx='2' fill='white'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="admin.css">
+  <script src="admin.js" defer></script>
+</head>
+<body>
+
+<!-- Connexion ------------------------------------------------------------------------------ -->
+<main id="login" class="login" hidden>
+  <form id="login-form" class="card login-card">
+    <h1>Administration des licences</h1>
+    <p class="muted">Serveur MCP Sage 100 — saisissez la clé d'administration (<code>X-Admin-Key</code>).
+      Elle n'est conservée que dans cet onglet.</p>
+    <label>Clé d'administration
+      <input id="login-key" type="password" autocomplete="current-password" required autofocus>
+    </label>
+    <p id="login-error" class="error" hidden></p>
+    <button class="btn primary" type="submit">Se connecter</button>
+  </form>
+</main>
+
+<!-- Application ---------------------------------------------------------------------------- -->
+<div id="app" hidden>
+  <header class="topbar">
+    <div class="brand">Licences <span class="muted">Sage 100 MCP</span></div>
+    <nav class="tabs" role="tablist">
+      <button class="tab" role="tab" data-tab="licenses" aria-selected="true">Licences</button>
+      <button class="tab" role="tab" data-tab="releases" aria-selected="false">Versions</button>
+    </nav>
+    <div class="topbar-actions">
+      <button id="refresh" class="btn ghost" type="button" title="Recharger">Actualiser</button>
+      <button id="logout" class="btn ghost" type="button">Déconnexion</button>
+    </div>
+  </header>
+
+  <main class="content">
+    <!-- Onglet Licences -->
+    <section id="tab-licenses" role="tabpanel">
+      <div class="stats" id="stats"></div>
+      <div class="toolbar">
+        <input id="search" type="search" placeholder="Rechercher un client, une clé, un poste…" aria-label="Rechercher">
+        <select id="filter" aria-label="Filtrer par statut">
+          <option value="">Tous les statuts</option>
+          <option value="active">Actives</option>
+          <option value="expiring">Expirent sous 30 jours</option>
+          <option value="expired">Expirées</option>
+          <option value="revoked">Révoquées</option>
+        </select>
+        <button id="new-license" class="btn primary" type="button">Nouvelle licence</button>
+      </div>
+      <div class="table-wrap">
+        <table class="grid">
+          <thead>
+            <tr>
+              <th>Client</th><th>Clé</th><th>Échéance</th><th>Statut</th><th class="num">Postes</th>
+              <th>Dernière validation</th><th>Version</th><th>Canal</th>
+            </tr>
+          </thead>
+          <tbody id="licenses-body"></tbody>
+        </table>
+        <p id="licenses-empty" class="empty" hidden>Aucune licence.</p>
+      </div>
+    </section>
+
+    <!-- Onglet Versions -->
+    <section id="tab-releases" role="tabpanel" hidden>
+      <div class="toolbar">
+        <p class="muted grow">Versions du serveur MCP servies aux lanceurs. Une version publiée est immuable :
+          pour corriger, publiez un nouveau numéro.</p>
+        <button id="new-release" class="btn primary" type="button">Enregistrer une version</button>
+      </div>
+      <div class="table-wrap">
+        <table class="grid">
+          <thead>
+            <tr><th>Version</th><th>Canal</th><th>Publiée le</th><th>État</th><th>SHA-256</th><th>Notes</th><th></th></tr>
+          </thead>
+          <tbody id="releases-body"></tbody>
+        </table>
+        <p id="releases-empty" class="empty" hidden>Aucune version publiée.</p>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- Détail d'une licence -------------------------------------------------------------------- -->
+<dialog id="license-dialog" class="dialog wide">
+  <div class="dialog-head">
+    <div>
+      <h2 id="ld-title"></h2>
+      <p class="muted" id="ld-subtitle"></p>
+    </div>
+    <button class="btn ghost icon" type="button" data-close aria-label="Fermer">✕</button>
+  </div>
+
+  <div class="dialog-body">
+    <form id="ld-general" class="section">
+      <h3>Général</h3>
+      <div class="fields">
+        <label>Client <input name="clientName" required maxlength="200"></label>
+        <label>Échéance <input name="expires" type="date" required></label>
+        <label>Postes autorisés <input name="maxMachines" type="number" min="1" max="1000" required></label>
+      </div>
+      <div class="actions"><button class="btn primary" type="submit">Enregistrer</button></div>
+    </form>
+
+    <section class="section">
+      <div class="section-head">
+        <h3>Postes activés</h3>
+        <button id="ld-release-all" class="btn ghost small" type="button">Libérer tous les postes</button>
+      </div>
+      <p class="muted small">Le poste est identifié par une empreinte du MachineGuid de Windows. Libérez-le après un
+        changement de PC, une réinstallation de Windows ou une migration de serveur.</p>
+      <div class="table-wrap">
+        <table class="grid compact">
+          <thead><tr><th>Poste</th><th>Empreinte</th><th>Activé le</th><th>Vu le</th><th>État</th><th></th></tr></thead>
+          <tbody id="ld-machines"></tbody>
+        </table>
+        <p id="ld-machines-empty" class="empty" hidden>Aucun poste activé : le prochain poste qui se présente prendra la place.</p>
+      </div>
+    </section>
+
+    <form id="ld-tools" class="section">
+      <h3>Outils autorisés</h3>
+      <div class="radio-row">
+        <label class="radio"><input type="radio" name="toolsMode" value="all"> Tous les outils</label>
+        <label class="radio"><input type="radio" name="toolsMode" value="some"> Liste restreinte</label>
+      </div>
+      <div id="ld-tools-list" class="tools"></div>
+      <div class="actions"><button class="btn primary" type="submit">Enregistrer les outils</button></div>
+    </form>
+
+    <form id="ld-policy" class="section">
+      <h3>Mises à jour</h3>
+      <div class="fields">
+        <label>Canal <input name="updateChannel" list="channels" required maxlength="40"></label>
+        <label>Version épinglée
+          <select name="pinnedVersion"></select>
+        </label>
+      </div>
+      <p class="muted small">Épingler gèle ce client sur une version (clôture annuelle, par exemple). Un épinglage
+        sous le plancher de version est ignoré.</p>
+      <div class="actions"><button class="btn primary" type="submit">Enregistrer la politique</button></div>
+    </form>
+
+    <section class="section danger-zone">
+      <h3>Zone sensible</h3>
+      <div class="danger-row">
+        <div>
+          <strong id="ld-revoke-label"></strong>
+          <p class="muted small" id="ld-revoke-help"></p>
+        </div>
+        <button id="ld-revoke" class="btn danger" type="button"></button>
+      </div>
+      <div class="danger-row">
+        <div>
+          <strong>Supprimer la licence</strong>
+          <p class="muted small">Définitif. La clé ne sera plus reconnue et ne peut pas être recréée.</p>
+        </div>
+        <button id="ld-delete" class="btn danger" type="button">Supprimer</button>
+      </div>
+    </section>
+  </div>
+</dialog>
+
+<!-- Nouvelle licence ------------------------------------------------------------------------ -->
+<dialog id="create-dialog" class="dialog">
+  <form id="create-form">
+    <div class="dialog-head">
+      <h2>Nouvelle licence</h2>
+      <button class="btn ghost icon" type="button" data-close aria-label="Fermer">✕</button>
+    </div>
+    <div class="dialog-body">
+      <div class="fields single">
+        <label>Client <input name="clientName" required maxlength="200" placeholder="Raison sociale"></label>
+        <label>Échéance <input name="expires" type="date" required></label>
+        <label>Postes autorisés <input name="maxMachines" type="number" min="1" max="1000" value="1" required></label>
+      </div>
+      <p class="muted small">Tous les outils sont autorisés ; vous pourrez restreindre la liste ensuite.</p>
+    </div>
+    <div class="dialog-foot">
+      <button class="btn ghost" type="button" data-close>Annuler</button>
+      <button class="btn primary" type="submit">Créer la licence</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Clé créée (affichée une seule fois) ----------------------------------------------------- -->
+<dialog id="key-dialog" class="dialog">
+  <div class="dialog-head"><h2>Licence créée</h2></div>
+  <div class="dialog-body">
+    <p class="warning">Cette clé n'est affichée <strong>qu'une seule fois</strong> : le serveur n'en conserve qu'une
+      empreinte. Copiez-la et transmettez-la au client par un canal sûr.</p>
+    <div class="key-box">
+      <code id="key-value"></code>
+      <button id="key-copy" class="btn primary small" type="button">Copier</button>
+    </div>
+    <p class="muted small">À renseigner dans <code>License:LicenseKey</code> du appsettings.json du poste client.</p>
+  </div>
+  <div class="dialog-foot"><button class="btn primary" type="button" data-close>J'ai copié la clé</button></div>
+</dialog>
+
+<!-- Nouvelle version ------------------------------------------------------------------------ -->
+<dialog id="release-dialog" class="dialog">
+  <form id="release-form">
+    <div class="dialog-head">
+      <h2>Enregistrer une version</h2>
+      <button class="btn ghost icon" type="button" data-close aria-label="Fermer">✕</button>
+    </div>
+    <div class="dialog-body">
+      <div class="fields">
+        <label>Version <input name="version" required pattern="\d+\.\d+\.\d+(\.\d+)?" placeholder="1.3.0"></label>
+        <label>Canal <input name="channel" list="channels" value="stable" required maxlength="40"></label>
+      </div>
+      <div class="fields single">
+        <label>URL du paquet <input name="downloadUrl" type="url" required placeholder="https://github.com/…/sage100mcp-1.3.0-win-x64.zip"></label>
+        <label>SHA-256 <input name="sha256" required pattern="[0-9A-Fa-f]{64}" placeholder="64 caractères hexadécimaux"></label>
+        <label>Notes <textarea name="notes" rows="3"></textarea></label>
+      </div>
+      <label class="check"><input type="checkbox" name="isMinimum"> Version plancher : mise à jour obligatoire
+        pour tous les clients en dessous</label>
+    </div>
+    <div class="dialog-foot">
+      <button class="btn ghost" type="button" data-close>Annuler</button>
+      <button class="btn primary" type="submit">Enregistrer</button>
+    </div>
+  </form>
+</dialog>
+
+<datalist id="channels"><option value="stable"><option value="beta"></datalist>
+<div id="toasts" class="toasts" aria-live="polite"></div>
+
+</body>
+</html>

@@ -36,6 +36,29 @@ var requireMachineId = app.Configuration.GetValue("Licensing:RequireMachineId", 
 // Durée pendant laquelle un jeton reste accepté hors connexion par le client.
 var offlineGraceDays = app.Configuration.GetValue("Licensing:OfflineGraceDays", 7);
 
+// --- Interface d'administration (wwwroot/admin) ---
+// Page statique sans aucun secret : elle appelle /api/admin/* avec la clé saisie par l'administrateur,
+// gardée en sessionStorage le temps de l'onglet. En-têtes stricts : aucun script ni style extérieur,
+// pas d'intégration dans un cadre (détournement de clic), pas de mise en cache.
+app.Use(async (context, next) =>
+{
+    if (context.Request.Path.StartsWithSegments("/admin"))
+    {
+        var headers = context.Response.Headers;
+        headers.ContentSecurityPolicy =
+            "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; " +
+            "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
+        headers.XFrameOptions = "DENY";
+        headers.XContentTypeOptions = "nosniff";
+        headers["Referrer-Policy"] = "no-referrer";
+        headers.CacheControl = "no-store";
+    }
+    await next();
+});
+// UseDefaultFiles redirige lui-même /admin vers /admin/ puis sert index.html.
+app.UseDefaultFiles();
+app.UseStaticFiles();
+
 // La valeur de remplacement de appsettings.json est publique (le fichier est versionné et le dépôt
 // est sur GitHub) : la refuser explicitement, sinon un déploiement qui oublie de définir
 // Licensing__AdminApiKey démarre avec une clé d'administration connue de tous.
@@ -302,6 +325,13 @@ releasesAdmin.MapPost("/{version}/unyank", async Task<Results<Ok<ReleaseRecord>,
 releasesAdmin.MapPost("/{version}/minimum", async Task<Results<Ok<ReleaseRecord>, NotFound>> (
     string version, ReleaseRepository repo, CancellationToken ct) =>
     await repo.SetFlagsAsync(version, isYanked: null, isMinimum: true, ct)
+        ? TypedResults.Ok((await repo.FindAsync(version, ct))!)
+        : TypedResults.NotFound());
+
+// Lève le plancher : la version redevient une mise à jour ordinaire.
+releasesAdmin.MapDelete("/{version}/minimum", async Task<Results<Ok<ReleaseRecord>, NotFound>> (
+    string version, ReleaseRepository repo, CancellationToken ct) =>
+    await repo.SetFlagsAsync(version, isYanked: null, isMinimum: false, ct)
         ? TypedResults.Ok((await repo.FindAsync(version, ct))!)
         : TypedResults.NotFound());
 
