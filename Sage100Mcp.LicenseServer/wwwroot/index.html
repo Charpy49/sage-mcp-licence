@@ -1,0 +1,418 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MCP pour Sage 100 — Interrogez Sage 100 avec Claude</title>
+  <meta name="description" content="Connectez Claude à votre Sage 100 Comptabilité, Gestion commerciale et Production. Posez vos questions en français, obtenez tableaux et analyses en quelques secondes. Lecture seule, essai gratuit 30 jours.">
+  <link rel="icon" type="image/png" href="logo_datanima.png">
+  <meta name="theme-color" content="#ffffff">
+  <link rel="stylesheet" href="site.css">
+  <script src="site.js" defer></script>
+</head>
+<body>
+
+<div id="progress" class="progress" aria-hidden="true"></div>
+
+<!-- Filigrane : le logo, très pâle, monte et se dévoile au fil du défilement (site.js). -->
+<div class="watermark" aria-hidden="true">
+  <div class="watermark-stack">
+    <img class="base" src="logo_datanima.png" alt="">
+    <img class="reveal" src="logo_datanima.png" alt="">
+  </div>
+</div>
+
+<header id="nav" class="site-header">
+  <div class="wrap">
+    <a class="brand" href="#"><img class="brand-logo" src="logo_datanima.png" alt="" width="40" height="40"> MCP pour Sage 100</a>
+    <nav class="nav" aria-label="Navigation principale">
+      <a href="#fonctionnalites">Fonctionnalités</a>
+      <a href="#securite">Sécurité</a>
+      <a href="#offres">Offres</a>
+      <a href="#faq">FAQ</a>
+      <a href="#espace-client">Espace client</a>
+      <a class="btn btn-sm" href="#offres">Essai gratuit <span class="arw" aria-hidden="true">→</span></a>
+    </nav>
+    <button id="burger" class="burger" type="button" aria-label="Menu" aria-expanded="false" aria-controls="mobile-menu">
+      <span></span><span></span>
+    </button>
+  </div>
+</header>
+
+<nav id="mobile-menu" class="mobile-menu" aria-label="Navigation mobile">
+  <a href="#fonctionnalites">Fonctionnalités</a>
+  <a href="#securite">Sécurité</a>
+  <a href="#offres">Offres</a>
+  <a href="#faq">FAQ</a>
+  <a href="#espace-client">Espace client</a>
+  <a class="btn" href="#offres">Essai gratuit 30 jours</a>
+</nav>
+
+<main>
+
+<!-- Accroche ------------------------------------------------------------------------------- -->
+<section class="hero">
+  <div class="wrap">
+    <div class="rv">
+      <span class="eyebrow">Assistant IA pour Sage 100</span>
+      <h1>Posez vos questions à Sage 100. En français.</h1>
+      <p class="lead">Connectez Claude à votre comptabilité, votre gestion commerciale et votre production Sage 100.
+        Chiffre d'affaires, encours clients, trésorerie, TVA, stocks : la réponse arrive en quelques secondes,
+        en tableau prêt à analyser.</p>
+      <div class="hero-actions">
+        <a class="btn" href="#offres">Essayer gratuitement 30 jours <span class="arw" aria-hidden="true">→</span></a>
+        <a class="btn btn-ghost" href="#fonctionnalites">Voir ce qu'il sait faire</a>
+      </div>
+      <ul class="hero-points">
+        <li>Sans carte bancaire</li>
+        <li>Lecture seule</li>
+        <li>Installé en 5 minutes</li>
+      </ul>
+    </div>
+
+    <div id="chat" class="chat rv" aria-label="Exemple de conversation">
+      <div class="chat-bar">
+        <span class="dot" aria-hidden="true"></span><span class="dot" aria-hidden="true"></span><span class="dot" aria-hidden="true"></span>
+        <span class="chat-status"><i class="pulse" aria-hidden="true"></i> Connecté à Sage 100</span>
+      </div>
+      <div class="chat-body">
+        <div class="msg-user step"><span class="typed">Quels clients me doivent le plus, et depuis combien de temps ?</span><i class="caret" aria-hidden="true"></i><span class="untyped" aria-hidden="true"></span></div>
+        <div class="msg-tool step"><i class="spin" aria-hidden="true"></i> sage_balance_agee_clients</div>
+        <div class="msg-bot">
+          <strong class="step">Encours clients au 18/10 — par ancienneté</strong>
+          <table>
+            <thead class="step"><tr><th>Client</th><th class="num">Encours</th><th class="num">&gt; 60 j</th></tr></thead>
+            <tbody>
+              <tr class="step"><td>Bati-Ouest SAS<span class="bar w90"></span></td><td class="num">48 210 €</td><td class="num">12 400 €</td></tr>
+              <tr class="step"><td>Menuiseries Durand<span class="bar w64"></span></td><td class="num">34 080 €</td><td class="num">0 €</td></tr>
+              <tr class="step"><td>Groupe Lemaire<span class="bar w41"></span></td><td class="num">21 950 €</td><td class="num">8 730 €</td></tr>
+              <tr class="step"><td>Atelier Morel<span class="bar w23"></span></td><td class="num">12 300 €</td><td class="num">2 150 €</td></tr>
+              <tr class="total step"><td>Total</td><td class="num">116 540 €</td><td class="num">23 280 €</td></tr>
+            </tbody>
+          </table>
+          <span class="muted small step">Bati-Ouest concentre plus de la moitié du retard à plus de 60 jours : une relance s'impose.</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <a class="scroll-cue" href="#fonctionnalites" aria-label="Défiler vers les fonctionnalités"><span class="cue-bar" aria-hidden="true"></span> Découvrir</a>
+</section>
+
+<div class="trust">
+  <div class="wrap">
+    <ul>
+      <li>Sage 100 Comptabilité</li>
+      <li>Sage 100 Gestion commerciale</li>
+      <li>Sage 100 Production</li>
+      <li>SQL Server</li>
+      <li>Claude Desktop</li>
+    </ul>
+  </div>
+</div>
+
+<!-- Fonctionnalités ------------------------------------------------------------------------ -->
+<section id="fonctionnalites" class="alt">
+  <div class="wrap">
+    <div class="section-head rv">
+      <span class="eyebrow">Fonctionnalités</span>
+      <h2>Près de 50 analyses métier, prêtes à l'emploi</h2>
+      <p>Pensées pour le dirigeant et le comptable. Vous posez la question, Claude choisit l'analyse,
+        interroge votre base et vous répond.</p>
+    </div>
+
+    <div class="grid-3">
+      <article class="card rv">
+        <div class="icon" aria-hidden="true">€</div>
+        <h3>Comptabilité &amp; finance</h3>
+        <p class="muted">Balance, grands livres, compte de résultat, TVA, trésorerie, échéanciers, emprunts.</p>
+        <ul>
+          <li><q>Quel est mon résultat à fin septembre ?</q></li>
+          <li><q>Combien de TVA vais-je décaisser ce mois-ci ?</q></li>
+          <li><q>Prévisionnel de trésorerie sur 3 mois.</q></li>
+          <li><q>Capital restant dû sur mes emprunts.</q></li>
+        </ul>
+      </article>
+      <article class="card rv">
+        <div class="icon" aria-hidden="true">↗</div>
+        <h3>Gestion commerciale</h3>
+        <p class="muted">Ventes, clients, commerciaux, carnet de commandes, devis, stocks et articles.</p>
+        <ul>
+          <li><q>Mes 10 meilleurs clients cette année.</q></li>
+          <li><q>Compare les ventes 2025 et 2026 mois par mois.</q></li>
+          <li><q>Quels articles sont sous le stock minimum ?</q></li>
+          <li><q>Clients sans commande depuis 6 mois.</q></li>
+        </ul>
+      </article>
+      <article class="card rv">
+        <div class="icon" aria-hidden="true">⚙</div>
+        <h3>Production</h3>
+        <p class="muted">Nomenclatures, ordres de fabrication et suivi d'atelier, en complément de la gestion commerciale.</p>
+        <ul>
+          <li><q>Quels ordres de fabrication sont en retard ?</q></li>
+          <li><q>Composants manquants pour la semaine prochaine.</q></li>
+          <li><q>Coût de revient de cet article.</q></li>
+          <li class="muted small">Outils de production en cours de déploiement, inclus dès leur sortie.</li>
+        </ul>
+      </article>
+    </div>
+
+    <div class="section-head center rv" id="comment">
+      <h2>Comment ça marche</h2>
+    </div>
+    <div class="grid-3">
+      <div class="card rv">
+        <div class="step-num">1</div>
+        <h3>Choisissez votre offre</h3>
+        <p class="muted">Commencez par l'essai gratuit : toutes les options pendant 30 jours. Votre clé de licence
+          s'affiche dès la validation.</p>
+      </div>
+      <div class="card rv">
+        <div class="step-num">2</div>
+        <h3>Installez en 5 minutes</h3>
+        <p class="muted">L'assistant d'installation détecte vos dossiers Sage 100, configure la connexion à SQL Server
+          et déclare le connecteur dans Claude Desktop. Aucun droit administrateur requis.</p>
+      </div>
+      <div class="card rv">
+        <div class="step-num">3</div>
+        <h3>Posez vos questions</h3>
+        <p class="muted">Ouvrez Claude et demandez ce que vous voulez savoir. Tableaux, graphiques et commentaires
+          sont générés à partir de vos chiffres réels.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Sécurité ------------------------------------------------------------------------------- -->
+<section id="securite">
+  <div class="wrap split">
+    <div class="rv">
+      <span class="eyebrow">Sécurité</span>
+      <h2>Vos données restent chez vous. Et en lecture seule.</h2>
+      <ul class="checklist">
+        <li><div><strong>Aucune écriture possible</strong>
+          <span>Seules les requêtes de lecture sont autorisées : toute instruction de modification est bloquée
+            avant d'atteindre la base.</span></div></li>
+        <li><div><strong>Zéro gêne pour vos utilisateurs Sage</strong>
+          <span>Lecture non bloquante : aucun verrou n'est posé sur vos tables, même en pleine saisie.</span></div></li>
+        <li><div><strong>Connexion directe, sans copie</strong>
+          <span>Le connecteur tourne sur votre poste et interroge votre SQL Server avec vos droits Windows. Votre base
+            n'est jamais copiée ni envoyée chez nous : seules les réponses aux questions posées sont transmises à Claude.</span></div></li>
+        <li><div><strong>Licence liée à votre poste</strong>
+          <span>Jeton signé, vérifié localement : une clé ne peut pas être réutilisée sur un poste non autorisé.</span></div></li>
+      </ul>
+    </div>
+    <pre class="codebox rv" aria-label="Exemple de protection en lecture seule"><span class="c">-- Ce que Claude peut faire</span>
+<span class="k">SELECT</span> CT_Num, SUM(EC_Montant) <span class="k">FROM</span> F_ECRITUREC …
+<span class="ok">✓ exécuté — 0 verrou posé</span>
+
+<span class="c">-- Ce qu'il ne pourra jamais faire</span>
+<span class="k">UPDATE</span> F_ECRITUREC <span class="k">SET</span> …
+<span class="ko">✗ refusé : base en lecture seule</span>
+
+<span class="k">DELETE FROM</span> F_COMPTET …
+<span class="ko">✗ refusé : base en lecture seule</span></pre>
+  </div>
+</section>
+
+<!-- Offres --------------------------------------------------------------------------------- -->
+<section id="offres" class="alt">
+  <div class="wrap">
+    <div class="section-head rv">
+      <span class="eyebrow">Offres</span>
+      <h2>Un abonnement simple, sans engagement</h2>
+      <p>Résiliable à tout moment depuis votre espace client. Commencez gratuitement, choisissez ensuite.</p>
+    </div>
+
+    <p id="shop-closed" class="form-error center" hidden>La souscription en ligne ouvre très bientôt.
+      Écrivez-nous pour démarrer dès maintenant.</p>
+
+    <div class="pricing">
+      <article class="plan rv">
+        <h3>Essai gratuit</h3>
+        <p class="tagline">Toutes les options pendant un mois, pour juger sur pièces.</p>
+        <div class="price">0 €</div>
+        <div class="price-note">pendant 30 jours, sans carte bancaire</div>
+        <ul>
+          <li>Comptabilité &amp; finance</li>
+          <li>Gestion commerciale &amp; stocks</li>
+          <li>Production</li>
+          <li>Toutes vos bases Sage 100</li>
+          <li>Aucun prélèvement automatique</li>
+        </ul>
+        <form id="trial-form" novalidate>
+          <label class="small" for="trial-email">E-mail professionnel</label>
+          <input id="trial-email" name="email" type="email" autocomplete="email" placeholder="vous@entreprise.fr" required>
+          <button class="btn btn-block" type="submit" data-plan="essai">Démarrer l'essai</button>
+          <p class="form-error" role="alert" hidden></p>
+        </form>
+      </article>
+
+      <article class="plan rv">
+        <h3>Comptabilité</h3>
+        <p class="tagline">Pour piloter la finance avec Sage 100 Comptabilité.</p>
+        <div class="price">49 € <small>HT / mois</small></div>
+        <div class="price-note">27 analyses</div>
+        <ul>
+          <li>Tableau de bord &amp; compte de résultat</li>
+          <li>Balance, grands livres, journaux</li>
+          <li>Encours clients, balance âgée, relances</li>
+          <li>TVA, trésorerie, prévisionnel</li>
+          <li>Échéanciers &amp; emprunts</li>
+        </ul>
+        <form class="buy-form" novalidate>
+          <button class="btn btn-ghost btn-block" type="submit" data-plan="compta">Choisir Comptabilité</button>
+          <p class="form-error" role="alert" hidden></p>
+        </form>
+      </article>
+
+      <article class="plan featured rv">
+        <span class="plan-badge">Le plus choisi</span>
+        <h3>Gestion commerciale</h3>
+        <p class="tagline">Comptabilité + ventes, clients, commandes et stocks.</p>
+        <div class="price">99 € <small>HT / mois</small></div>
+        <div class="price-note">47 analyses</div>
+        <ul>
+          <li>Tout Comptabilité</li>
+          <li>Ventes par client, article, famille, commercial</li>
+          <li>Carnet de commandes &amp; devis en cours</li>
+          <li>Stocks, ruptures, articles dormants</li>
+          <li>Fiche client 360°, analyse ABC</li>
+        </ul>
+        <form class="buy-form" novalidate>
+          <button class="btn btn-block" type="submit" data-plan="gescom">Choisir Gestion commerciale</button>
+          <p class="form-error" role="alert" hidden></p>
+        </form>
+      </article>
+
+      <article class="plan rv">
+        <h3>Production</h3>
+        <p class="tagline">L'offre complète, pour les entreprises qui fabriquent.</p>
+        <div class="price">149 € <small>HT / mois</small></div>
+        <div class="price-note">toutes les analyses, présentes et à venir</div>
+        <ul>
+          <li>Tout Gestion commerciale</li>
+          <li class="soon">Nomenclatures &amp; ordres de fabrication <span class="tag">bientôt</span></li>
+          <li class="soon">Suivi d'atelier &amp; coûts de revient <span class="tag">bientôt</span></li>
+          <li>Nouveaux outils inclus automatiquement</li>
+        </ul>
+        <form class="buy-form" novalidate>
+          <button class="btn btn-ghost btn-block" type="submit" data-plan="production">Choisir Production</button>
+          <p class="form-error" role="alert" hidden></p>
+        </form>
+      </article>
+    </div>
+
+    <p class="pricing-foot rv">Prix hors taxes, TVA en sus. Paiement sécurisé par Stripe (carte bancaire).
+      Une licence = un poste ; changez d'offre à tout moment depuis votre espace client.</p>
+
+    <div class="compare-wrap rv">
+      <table class="compare">
+        <caption class="small muted">Comparatif des offres</caption>
+        <thead>
+          <tr><th scope="col">Domaine</th><th scope="col">Essai</th><th scope="col">Comptabilité</th>
+            <th scope="col">Gestion commerciale</th><th scope="col">Production</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Pilotage financier, résultat, ratios</th><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td></tr>
+          <tr><th scope="row">Balance, grands livres, journaux</th><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td></tr>
+          <tr><th scope="row">Trésorerie, TVA, échéanciers, emprunts</th><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td></tr>
+          <tr><th scope="row">Encours, balance âgée, retards de paiement</th><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td></tr>
+          <tr><th scope="row">Ventes, clients, commerciaux</th><td class="yes">✓</td><td class="no">—</td><td class="yes">✓</td><td class="yes">✓</td></tr>
+          <tr><th scope="row">Commandes, devis, factures</th><td class="yes">✓</td><td class="no">—</td><td class="yes">✓</td><td class="yes">✓</td></tr>
+          <tr><th scope="row">Stocks, ruptures, articles dormants</th><td class="yes">✓</td><td class="no">—</td><td class="yes">✓</td><td class="yes">✓</td></tr>
+          <tr><th scope="row">Production (nomenclatures, OF)</th><td class="yes">✓</td><td class="no">—</td><td class="no">—</td><td class="yes">✓</td></tr>
+          <tr><th scope="row">Durée</th><td>30 jours</td><td>mensuel</td><td>mensuel</td><td>mensuel</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- FAQ ------------------------------------------------------------------------------------ -->
+<section id="faq">
+  <div class="wrap">
+    <div class="section-head rv">
+      <span class="eyebrow">FAQ</span>
+      <h2>Questions fréquentes</h2>
+    </div>
+    <div class="faq rv">
+      <details>
+        <summary>De quoi ai-je besoin pour l'utiliser ?</summary>
+        <p>D'un poste Windows ayant accès au serveur SQL Server de votre Sage 100 (version SQL), et de Claude Desktop
+          avec un compte Claude. L'assistant d'installation s'occupe du reste.</p>
+      </details>
+      <details>
+        <summary>Que se passe-t-il à la fin de l'essai gratuit ?</summary>
+        <p>Rien d'automatique : sans moyen de paiement, l'essai s'arrête simplement au bout de 30 jours. Pour continuer
+          sans changer de clé, ouvrez l'espace client pendant l'essai, choisissez votre offre et ajoutez une carte.</p>
+      </details>
+      <details>
+        <summary>Claude peut-il modifier ma comptabilité ?</summary>
+        <p>Non. Le connecteur n'accepte que des requêtes de lecture et refuse toute instruction de modification ou de
+          suppression. Vos écritures, tiers et documents ne peuvent pas être altérés.</p>
+      </details>
+      <details>
+        <summary>Mes données sont-elles envoyées sur vos serveurs ?</summary>
+        <p>Non. Le connecteur s'exécute sur votre poste et interroge directement votre base. Nos serveurs ne reçoivent
+          que la vérification de votre licence. Les résultats des questions que vous posez sont transmis à Claude pour
+          qu'il vous réponde.</p>
+      </details>
+      <details>
+        <summary>Puis-je changer d'offre ou résilier ?</summary>
+        <p>Oui, à tout moment depuis l'espace client : le changement d'offre est immédiat et calculé au prorata, la
+          résiliation prend effet à la fin du mois en cours. Votre clé de licence reste la même.</p>
+      </details>
+      <details>
+        <summary>Plusieurs dossiers Sage 100 sont-ils couverts ?</summary>
+        <p>Oui : une licence donne accès à toutes les bases Sage 100 déclarées sur le poste, sans supplément.</p>
+      </details>
+      <details>
+        <summary>Et si je change d'ordinateur ?</summary>
+        <p>Une licence est liée à un poste. Écrivez-nous et nous libérons l'ancien poste : le nouveau prend sa place
+          au premier démarrage.</p>
+      </details>
+      <details>
+        <summary>Recevrai-je une facture ?</summary>
+        <p>Oui, une facture est émise à chaque prélèvement et reste téléchargeable dans l'espace client.</p>
+      </details>
+    </div>
+  </div>
+</section>
+
+<!-- Espace client -------------------------------------------------------------------------- -->
+<section id="espace-client" class="alt">
+  <div class="wrap account">
+    <div class="section-head rv">
+      <span class="eyebrow">Espace client</span>
+      <h2>Gérer mon abonnement</h2>
+      <p>Factures, moyen de paiement, changement d'offre, résiliation.</p>
+    </div>
+    <form id="portal-form" class="rv" novalidate>
+      <label class="small" for="portal-key" hidden>Clé de licence</label>
+      <input id="portal-key" name="licenseKey" type="text" autocomplete="off" spellcheck="false"
+             placeholder="SAGE-XXXX-XXXX-…" required>
+      <button class="btn" type="submit">Accéder</button>
+    </form>
+    <p id="portal-error" class="form-error" role="alert" hidden></p>
+    <p class="small muted center">Votre clé figure dans le fichier <code>appsettings.json</code> du connecteur
+      (<code>License:LicenseKey</code>) et sur la page affichée après votre souscription.</p>
+  </div>
+</section>
+
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <span class="foot-brand"><img src="logo_datanima.png" alt="" width="28" height="28"> © DatAnIma<span id="year">2026</span> MCP pour Sage 100</span>
+    <nav aria-label="Liens légaux">
+      <a href="mentions-legales.html">Mentions légales</a>
+      <a href="cgv.html">Conditions générales de vente</a>
+      <a href="mailto:contact@datanima.com">Contact</a>
+    </nav>
+    <p class="disclaimer">Sage et Sage 100 sont des marques de The Sage Group plc ou de ses filiales. Claude est une
+      marque d'Anthropic. Ce produit est un logiciel indépendant, ni édité ni approuvé par Sage ou Anthropic.</p>
+  </div>
+</footer>
+
+</body>
+</html>

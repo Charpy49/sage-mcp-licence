@@ -13,7 +13,7 @@ namespace Sage100Mcp.Launcher;
 internal static class Log
 {
     /// <summary>
-    /// Écrit stderr en UTF-8 quand il est redirigé vers un client MCP. Par défaut .NET encode avec
+    /// Écrit stderr et stdout en UTF-8 quand ils sont redirigés (client MCP, installateur). Par défaut .NET encode avec
     /// la page de code de la console (850/1252), que les clients MCP relisent en UTF-8 : les accents
     /// arrivaient illisibles. Sur une vraie console (commandes --status, --rollback), on ne touche
     /// à rien. Sans BOM : le préambule serait émis tel quel en tête du flux.
@@ -22,8 +22,14 @@ internal static class Log
     {
         try
         {
-            if (!Console.IsErrorRedirected) return;
-            Console.SetError(new StreamWriter(Console.OpenStandardError(), new UTF8Encoding(false)) { AutoFlush = true });
+            var utf8 = new UTF8Encoding(false);
+            if (Console.IsErrorRedirected)
+                Console.SetError(new StreamWriter(Console.OpenStandardError(), utf8) { AutoFlush = true });
+
+            // stdout n'est écrit que par les commandes --launcher-* (lues par l'installateur) ; en
+            // lancement normal le shim n'y écrit rien, le serveur en hérite directement.
+            if (Console.IsOutputRedirected)
+                Console.SetOut(new StreamWriter(Console.OpenStandardOutput(), utf8) { AutoFlush = true });
         }
         catch
         {

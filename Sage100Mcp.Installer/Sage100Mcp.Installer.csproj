@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>Sage100Mcp.Installer</AssemblyName>
+    <RootNamespace>Sage100Mcp.Installer</RootNamespace>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+
+  <!--
+    Le lanceur est embarqué dans l'installateur : un seul fichier à transmettre au client.
+    Il est publié en fichier unique dépendant du framework, exactement comme celui diffusé à la main
+    jusqu'ici (Properties/PublishProfiles/FolderProfile.pubxml du lanceur).
+    Exec plutôt que la tâche MSBuild : la publication avec un RuntimeIdentifier exige une
+    restauration dédiée, qu'un processus séparé fait sans interférer avec la génération en cours.
+  -->
+  <PropertyGroup>
+    <LauncherProject>$(MSBuildThisFileDirectory)..\Sage100Mcp.Launcher\Sage100Mcp.Launcher.csproj</LauncherProject>
+    <LauncherPublishDir>$(MSBuildThisFileDirectory)obj\launcher\</LauncherPublishDir>
+    <LauncherExe>$(LauncherPublishDir)Sage100Mcp.Launcher.exe</LauncherExe>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <LauncherSources Include="..\Sage100Mcp.Launcher\**\*.cs;$(LauncherProject)" Exclude="..\Sage100Mcp.Launcher\obj\**;..\Sage100Mcp.Launcher\bin\**" />
+  </ItemGroup>
+
+  <Target Name="PublishLauncher" BeforeTargets="PrepareForBuild" Inputs="@(LauncherSources)" Outputs="$(LauncherExe)">
+    <Exec Command="dotnet publish &quot;$(LauncherProject)&quot; -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -o &quot;$(LauncherPublishDir.TrimEnd('\'))&quot;" />
+  </Target>
+
+  <ItemGroup>
+    <EmbeddedResource Include="$(LauncherExe)" LogicalName="Sage100Mcp.Launcher.exe" Visible="false" />
+  </ItemGroup>
+
+</Project>

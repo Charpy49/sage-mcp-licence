@@ -1,7 +1,9 @@
 using System.Security.Cryptography;
 using System.Text;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Sage100Mcp.LicenseServer.Licensing;
+using Sage100Mcp.LicenseServer.Shop;
 
 // Outil ponctuel : génère la paire de clés de signature des licences, puis s'arrête.
 //   dotnet run -- generate-signing-key
@@ -22,6 +24,15 @@ builder.Services.AddSingleton<LicenseRepository>();
 builder.Services.AddSingleton<ReleaseRepository>();
 builder.Services.AddSingleton<LicenseSigner>();
 
+// Boutique en ligne (site commercial + Stripe). Les clés Data Protection chiffrent les clés de licence
+// en attente d'affichage sur la page de confirmation : elles doivent survivre aux redéploiements, d'où
+// leur place à côté de la base et non dans le dossier de l'application.
+builder.Services.AddDataProtection()
+    .SetApplicationName("Sage100Mcp.LicenseServer")
+    .PersistKeysToFileSystem(new DirectoryInfo(Path.Combine(
+        Path.GetDirectoryName(SqlitePaths.ResolveDatabasePath(builder.Configuration))!, "dataprotection-keys")));
+builder.Services.AddShop();
+
 var app = builder.Build();
 
 // Instanciée dès le démarrage : une clé de signature absente ou invalide doit empêcher le service de
@@ -36,13 +47,15 @@ var requireMachineId = app.Configuration.GetValue("Licensing:RequireMachineId", 
 // Durée pendant laquelle un jeton reste accepté hors connexion par le client.
 var offlineGraceDays = app.Configuration.GetValue("Licensing:OfflineGraceDays", 7);
 
-// --- Interface d'administration (wwwroot/admin) ---
-// Page statique sans aucun secret : elle appelle /api/admin/* avec la clé saisie par l'administrateur,
-// gardée en sessionStorage le temps de l'onglet. En-têtes stricts : aucun script ni style extérieur,
-// pas d'intégration dans un cadre (détournement de clic), pas de mise en cache.
+// --- Site commercial (wwwroot) et interface d'administration (wwwroot/admin) ---
+// Pages statiques sans aucun secret. En-têtes stricts sur toutes les pages : aucun script ni style
+// extérieur ou en ligne, pas d'intégration dans un cadre (détournement de clic). Le paiement se fait
+// sur la page hébergée de Stripe, vers laquelle le site redirige : rien de Stripe n'est chargé ici.
+// L'administration ajoute « pas de cache » : la page appelle /api/admin/* avec la clé saisie, gardée en
+// sessionStorage le temps de l'onglet.
 app.Use(async (context, next) =>
 {
-    if (context.Request.Path.StartsWithSegments("/admin"))
+    if (!context.Request.Path.StartsWithSegments("/api"))
     {
         var headers = context.Response.Headers;
         headers.ContentSecurityPolicy =
@@ -50,14 +63,23 @@ app.Use(async (context, next) =>
             "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
         headers.XFrameOptions = "DENY";
         headers.XContentTypeOptions = "nosniff";
-        headers["Referrer-Policy"] = "no-referrer";
-        headers.CacheControl = "no-store";
+        headers["Referrer-Policy"] = context.Request.Path.StartsWithSegments("/admin")
+            ? "no-referrer"
+            : "strict-origin-when-cross-origin";
+        if (context.Request.Path.StartsWithSegments("/admin") ||
+            context.Request.Path.StartsWithSegments("/merci.html"))
+        {
+            // La page de confirmation affiche une clé de licence : ni cache, ni fuite par le Referer.
+            headers.CacheControl = "no-store";
+            headers["Referrer-Policy"] = "no-referrer";
+        }
     }
     await next();
 });
 // UseDefaultFiles redirige lui-même /admin vers /admin/ puis sert index.html.
 app.UseDefaultFiles();
 app.UseStaticFiles();
+app.UseRateLimiter();
 
 // La valeur de remplacement de appsettings.json est publique (le fichier est versionné et le dépôt
 // est sur GitHub) : la refuser explicitement, sinon un déploiement qui oublie de définir
@@ -71,6 +93,8 @@ if (string.IsNullOrWhiteSpace(adminKey) || adminKey == adminKeyPlaceholder)
         "Licensing:AdminApiKey doit être configuré avec une vraie clé secrète (variable d'environnement " +
         $"Licensing__AdminApiKey, ou appsettings.json hors dépôt). Valeur actuelle : {(string.IsNullOrWhiteSpace(adminKey) ? "absente" : "valeur de remplacement")}.");
 }
+
+app.MapShop();
 
 // --- Endpoint public, appelé par les serveurs MCP déployés chez les clients ---
 app.MapPost("/api/license/validate", async Task<Ok<ValidateResponse>> (

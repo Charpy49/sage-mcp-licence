@@ -23,6 +23,8 @@ const TOOL_GROUPS = [
   ['Finance', ['sage_tva', 'sage_tresorerie', 'sage_previsionnel_encaissements', 'sage_echeancier_detaille',
     'sage_echeancier_emprunts', 'sage_cadence_charges_fixes']],
   ['Stock', ['sage_stock_inventaire', 'sage_articles_en_rupture']],
+  ['Production', ['sage_fabrications', 'sage_cout_revient_fabrication', 'sage_nomenclature_constatee',
+    'sage_cas_emploi_composant']],
   ['Référentiel', ['sage_lister_bases', 'sage_lister_journaux', 'sage_rechercher_comptes', 'sage_rechercher_tiers']],
 ];
 

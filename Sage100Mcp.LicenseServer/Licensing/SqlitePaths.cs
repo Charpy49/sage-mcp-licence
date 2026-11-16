@@ -5,7 +5,14 @@ namespace Sage100Mcp.LicenseServer.Licensing;
 /// <summary>Résolution de la base SQLite locale, partagée par les dépôts.</summary>
 internal static class SqlitePaths
 {
-    public static string ResolveConnectionString(IConfiguration configuration)
+    public static string ResolveConnectionString(IConfiguration configuration) =>
+        new SqliteConnectionStringBuilder { DataSource = ResolveDatabasePath(configuration) }.ToString();
+
+    /// <summary>
+    /// Chemin absolu de la base. Son dossier est aussi celui des autres données persistantes
+    /// (clés Data Protection) : sur Azure, /home/data survit aux déploiements, wwwroot non.
+    /// </summary>
+    public static string ResolveDatabasePath(IConfiguration configuration)
     {
         var dbPath = configuration["Licensing:DatabasePath"] ?? "licenses.db";
         if (!Path.IsPathRooted(dbPath))
@@ -13,7 +20,7 @@ internal static class SqlitePaths
             dbPath = Path.Combine(AppContext.BaseDirectory, dbPath);
         }
         Directory.CreateDirectory(Path.GetDirectoryName(dbPath)!);
-        return new SqliteConnectionStringBuilder { DataSource = dbPath }.ToString();
+        return dbPath;
     }
 
     /// <summary>Ajoute une colonne si elle n'existe pas déjà (migration des bases existantes).</summary>

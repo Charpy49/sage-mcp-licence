@@ -45,6 +45,18 @@ param(
     # ce qui impose d'avoir d'abord diffusé un serveur MCP portant la nouvelle clé publique.
     [string]$SigningKey,
 
+    # --- Boutique en ligne (voir setup-stripe.ps1, qui affiche ces valeurs) ---
+    # Chaque réglage n'est écrit que s'il est fourni : les relances suivantes les conservent.
+    [string]$StripeSecretKey,
+    [string]$StripeWebhookSecret,
+    [string]$StripePriceCompta,
+    [string]$StripePriceGescom,
+    [string]$StripePriceProduction,
+    # URL publique du site si un domaine personnalisé est utilisé (sinon l'hôte de la requête).
+    [string]$PublicBaseUrl,
+    # Lien de téléchargement de l'assistant d'installation, affiché après la souscription.
+    [string]$InstallerUrl,
+
     # Ne redéployer que le code, sans retoucher aux réglages d'application.
     [switch]$CodeOnly
 )
@@ -184,6 +196,25 @@ elseif (-not $hasSigningKey) {
     throw "L'application n'a pas de Licensing__SigningKey : relancez avec -SigningKey (voir l'exemple dans l'aide du script)."
 }
 
+# --- Boutique en ligne -------------------------------------------------------------------------
+$shopSettings = @()
+if ($StripeSecretKey)       { $shopSettings += "Stripe__SecretKey=$StripeSecretKey" }
+if ($StripeWebhookSecret)   { $shopSettings += "Stripe__WebhookSecret=$StripeWebhookSecret" }
+if ($StripePriceCompta)     { $shopSettings += "Stripe__Prices__compta=$StripePriceCompta" }
+if ($StripePriceGescom)     { $shopSettings += "Stripe__Prices__gescom=$StripePriceGescom" }
+if ($StripePriceProduction) { $shopSettings += "Stripe__Prices__production=$StripePriceProduction" }
+if ($PublicBaseUrl)         { $shopSettings += "Shop__PublicBaseUrl=$($PublicBaseUrl.TrimEnd('/'))" }
+if ($InstallerUrl)          { $shopSettings += "Shop__InstallerUrl=$InstallerUrl" }
+if ($shopSettings) {
+    Write-Host "Réglages de la boutique ($($shopSettings.Count))…" -ForegroundColor Cyan
+    Invoke-Az webapp config appsettings set --name $AppName --resource-group $ResourceGroup `
+        --settings $shopSettings --output none
+}
+elseif (-not ($appSettings | Where-Object { $_.name -eq 'Stripe__SecretKey' }).value) {
+    Write-Host "Boutique non configurée (pas de Stripe__SecretKey) : le site s'affiche, la souscription est fermée." `
+        -ForegroundColor Yellow
+}
+
 # --- Publication du code ----------------------------------------------------------------------
 $stageDir = Join-Path ([System.IO.Path]::GetTempPath()) "ls-publish-$([Guid]::NewGuid().ToString('N'))"
 $zipPath = Join-Path ([System.IO.Path]::GetTempPath()) "ls-$AppName.zip"
@@ -211,6 +242,7 @@ Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
 $base = "https://$AppName.azurewebsites.net"
 Write-Host ""
 Write-Host "URL : $base" -ForegroundColor Green
+Write-Host "Site commercial : $base/   —   Administration : $base/admin" -ForegroundColor Green
 
 # Le premier appel réveille l'application : le délai est normal, il n'indique pas une panne.
 try {

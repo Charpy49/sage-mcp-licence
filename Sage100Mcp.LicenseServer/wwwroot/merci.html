@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Bienvenue — MCP pour Sage 100</title>
+  <link rel="icon" type="image/png" href="logo_datanima.png">
+  <link rel="stylesheet" href="site.css">
+  <script src="merci.js" defer></script>
+</head>
+<body>
+
+<header class="site-header solid">
+  <div class="wrap">
+    <a class="brand" href="/"><img class="brand-logo" src="logo_datanima.png" alt="" width="40" height="40"> MCP pour Sage 100</a>
+  </div>
+</header>
+
+<main class="page">
+
+  <div id="state-loading" class="result">
+    <div class="spinner" aria-hidden="true"></div>
+    <h1>Finalisation de votre souscription…</h1>
+    <p class="muted">Nous créons votre licence. Cela prend généralement quelques secondes.</p>
+  </div>
+
+  <div id="state-ready" class="result" hidden>
+    <span class="eyebrow" id="ready-plan"></span>
+    <h1 id="ready-title">Votre licence est prête</h1>
+    <p class="muted" id="ready-summary"></p>
+
+    <h2>Votre clé de licence</h2>
+    <div class="license-key">
+      <code id="license-key"></code>
+      <button id="copy-key" class="btn" type="button">Copier</button>
+    </div>
+    <p class="small muted"><strong>Conservez-la précieusement</strong> (gestionnaire de mots de passe, par exemple) :
+      elle sert à installer le connecteur et à accéder à votre espace client. Pour des raisons de sécurité, cette page
+      ne l'affichera plus au-delà de quelques jours.</p>
+
+    <h2>Installation</h2>
+    <ol class="steps-list">
+      <li id="installer-step">Téléchargez et lancez l'assistant d'installation sur le poste qui accède à Sage 100.</li>
+      <li>Collez votre clé de licence quand l'assistant vous la demande, puis sélectionnez vos dossiers Sage 100.</li>
+      <li>Redémarrez Claude Desktop : le connecteur Sage 100 apparaît dans la liste des outils.</li>
+      <li>Demandez par exemple : <q>Fais-moi le tableau de bord de l'année en cours.</q></li>
+    </ol>
+    <p><a id="installer-link" class="btn" href="#" hidden>Télécharger l'assistant d'installation</a></p>
+  </div>
+
+  <div id="state-expired" class="result" hidden>
+    <h1>Votre licence est active</h1>
+    <p class="muted">Pour des raisons de sécurité, la clé de licence n'est plus affichée sur cette page. Retrouvez-la
+      dans le fichier <code>appsettings.json</code> du connecteur, ou écrivez-nous depuis l'adresse utilisée lors de la
+      souscription.</p>
+    <p><a class="btn btn-ghost" href="/#espace-client">Espace client</a></p>
+  </div>
+
+  <div id="state-error" class="result" hidden>
+    <h1>Nous n'arrivons pas à retrouver votre souscription</h1>
+    <p class="muted" id="error-detail">Si votre paiement a été validé, votre licence a bien été créée : rechargez cette
+      page dans une minute. Le problème persiste ? Écrivez-nous en indiquant l'adresse e-mail utilisée.</p>
+    <p><button id="retry" class="btn" type="button">Réessayer</button></p>
+  </div>
+
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <span>© MCP pour Sage 100</span>
+    <nav aria-label="Liens légaux">
+      <a href="mentions-legales.html">Mentions légales</a>
+      <a href="cgv.html">Conditions générales de vente</a>
+    </nav>
+  </div>
+</footer>
+
+</body>
+</html>
