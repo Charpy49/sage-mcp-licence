@@ -198,11 +198,22 @@ public sealed class ExecutiveTools
         [Description("Nombre maximum de lignes affichées (défaut 50).")] int? limite = null,
         [Description("Nom de la base Sage (vide = base par défaut).")] string? base_sage = null,
         CancellationToken ct = default)
+        => await ParDepartementAsync(registry, achat: false, date_debut, date_fin, zone, limite, base_sage, ct);
+
+    /// <summary>
+    /// Corps commun de sage_ca_par_departement et sage_achats_par_departement : factures de vente
+    /// (domaine 0, types 6/7) ou d'achat (domaine 1, types 16/17), ventilées selon l'adresse du tiers.
+    /// </summary>
+    internal static async Task<string> ParDepartementAsync(
+        SageDatabaseRegistry registry, bool achat, string? date_debut, string? date_fin, string? zone, int? limite,
+        string? base_sage, CancellationToken ct)
     {
         var (from, to) = SagePeriod.Resolve(date_debut, date_fin);
         var n = Math.Clamp(limite ?? 50, 1, 200);
+        var filtreFactures = achat ? "d.DO_Domaine = 1 AND d.DO_Type IN (16, 17)" : "d.DO_Domaine = 0 AND d.DO_Type IN (6, 7)";
+        var libelle = achat ? "Achats" : "CA";
 
-        // Un client est "français" si CT_Pays est vide ou commence par "France".
+        // Un tiers est "français" si CT_Pays est vide ou commence par "France".
         const string estFrancais = "(ISNULL(c.CT_Pays, '') = '' OR c.CT_Pays LIKE 'France%')";
         var filtreZone = (zone?.Trim().ToLowerInvariant()) switch
         {
@@ -226,12 +237,12 @@ public sealed class ExecutiveTools
                       SUM(SUM(CASE WHEN {estFrancais} THEN d.DO_TotalHT ELSE 0 END)) OVER () AS GrandTotalFrance
                FROM F_DOCENTETE d
                LEFT JOIN F_COMPTET c ON c.CT_Num = d.DO_Tiers
-               WHERE d.DO_Domaine = 0 AND d.DO_Type IN (6, 7) AND d.DO_Date BETWEEN @from AND @to{filtreZone}
+               WHERE {filtreFactures} AND d.DO_Date BETWEEN @from AND @to{filtreZone}
                GROUP BY {deptForFr}, {paysEtr}
                ORDER BY CA_HT DESC",
             new Dictionary<string, object?> { ["@from"] = from, ["@to"] = to }, ct);
 
-        if (rows.Count == 0) return $"Aucune facture de vente {SagePeriod.Describe(from, to)}.";
+        if (rows.Count == 0) return $"Aucune facture {(achat ? "d'achat" : "de vente")} {SagePeriod.Describe(from, to)}.";
 
         // Totaux réels (toutes lignes), indépendants du TOP, via fonction fenêtre.
         decimal total = SageFormat.ToDecimal(rows[0]["GrandTotal"]);
@@ -249,7 +260,7 @@ public sealed class ExecutiveTools
         var table = SageFormat.Table(rows,
             ("Département / Pays", Libelle),
             ("Factures", r => SageFormat.ToLong(r["NbFactures"]).ToString()),
-            ("CA HT", r => SageFormat.Euro(r["CA_HT"])),
+            ($"{libelle} HT", r => SageFormat.Euro(r["CA_HT"])),
             ("% du total", r => total == 0 ? "0 %"
                 : (SageFormat.ToDecimal(r["CA_HT"]) / total).ToString("P1", SageFormat.Fr)));
 
@@ -264,8 +275,9 @@ public sealed class ExecutiveTools
             ? $" · {rows.Count} lignes affichées sur le total"
             : $" · {rows.Count} lignes";
 
-        return $"## Chiffre d'affaires par département{zoneLabel} {SagePeriod.Describe(from, to)}\n\n" + table +
-               $"\n**Total CA : {SageFormat.Euro(total)}** — dont France : {SageFormat.Euro(caFrance)} " +
+        var titre = achat ? "Achats par département du fournisseur" : "Chiffre d'affaires par département";
+        return $"## {titre}{zoneLabel} {SagePeriod.Describe(from, to)}\n\n" + table +
+               $"\n**Total {(achat ? "achats" : "CA")} : {SageFormat.Euro(total)}** — dont France : {SageFormat.Euro(caFrance)} " +
                $"({(total == 0 ? "0 %" : (caFrance / total).ToString("P1", SageFormat.Fr))}) · " +
                $"étranger : {SageFormat.Euro(total - caFrance)}{noteTronque}";
     }

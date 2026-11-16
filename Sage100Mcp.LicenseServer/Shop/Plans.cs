@@ -32,12 +32,13 @@ public static class Plans
     [
         // Pilotage financier
         "sage_tableau_de_bord", "sage_chiffre_affaires", "sage_compte_resultat", "sage_evolution_ca_annuelle",
-        "sage_ratios_pilotage", "sage_top_fournisseurs", "sage_achats_par_mois",
+        "sage_ratios_pilotage", "sage_top_fournisseurs", "sage_achats_par_mois", "sage_evolution_achats_annuelle",
         // Comptabilité
         "sage_balance_generale", "sage_grand_livre_compte", "sage_grand_livre_tiers", "sage_journal_comptable",
         // Trésorerie, créances, fiscal
         "sage_encours_clients", "sage_dettes_fournisseurs", "sage_balance_agee_clients",
-        "sage_balance_agee_fournisseurs", "sage_retards_clients", "sage_conditions_reglement_tiers",
+        "sage_balance_agee_fournisseurs", "sage_retards_clients", "sage_retards_fournisseurs",
+        "sage_conditions_reglement_tiers",
         "sage_tva", "sage_tresorerie", "sage_previsionnel_encaissements", "sage_echeancier_detaille",
         "sage_echeancier_emprunts", "sage_cadence_charges_fixes",
         // Référentiel
@@ -52,6 +53,12 @@ public static class Plans
         "sage_comparatif_ventes", "sage_analyse_abc_clients", "sage_nouveaux_clients", "sage_panier_moyen",
         "sage_commandes_clients_en_cours", "sage_commandes_clients_detail", "sage_devis_clients_en_cours",
         "sage_clients_inactifs", "sage_fiche_client", "sage_detail_facture",
+        // Achats (pendants des outils de vente)
+        "sage_achats_factures_par_mois", "sage_top_articles_achetes", "sage_achats_par_famille",
+        "sage_achats_par_departement", "sage_achats_par_acheteur", "sage_comparatif_achats",
+        "sage_analyse_abc_fournisseurs", "sage_nouveaux_fournisseurs", "sage_facture_moyenne_achats",
+        "sage_commandes_fournisseurs_en_cours", "sage_commandes_fournisseurs_detail", "sage_demandes_achat_en_cours",
+        "sage_fournisseurs_inactifs", "sage_fiche_fournisseur", "sage_detail_facture_fournisseur",
         "sage_stock_inventaire", "sage_articles_en_rupture", "sage_articles_dormants",
     ];
 

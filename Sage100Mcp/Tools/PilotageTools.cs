@@ -64,15 +64,7 @@ public sealed class PilotageTools
         var (from, to) = SagePeriod.Resolve(date_debut, date_fin);
         var n = Math.Clamp(top ?? 30, 1, 200);
         var rows = await registry.QueryAsync(base_sage,
-            $@"SELECT TOP ({n}) ISNULL(NULLIF(CAST(a.FA_CodeFamille AS varchar(50)), ''), '(sans famille)') AS Famille,
-                      SUM(l.DL_MontantHT) AS CA_HT, SUM(l.DL_Qte) AS Qte,
-                      COUNT(DISTINCT l.AR_Ref) AS NbArticles,
-                      SUM(SUM(l.DL_MontantHT)) OVER () AS GrandTotal
-               FROM F_DOCLIGNE l
-               LEFT JOIN F_ARTICLE a ON a.AR_Ref = l.AR_Ref
-               WHERE l.DO_Domaine = 0 AND l.DO_Type IN (6, 7) AND l.DO_Date BETWEEN @from AND @to
-               GROUP BY ISNULL(NULLIF(CAST(a.FA_CodeFamille AS varchar(50)), ''), '(sans famille)')
-               ORDER BY CA_HT DESC",
+            FamilleSql(n, "l.DO_Domaine = 0 AND l.DO_Type IN (6, 7)"),
             new Dictionary<string, object?> { ["@from"] = from, ["@to"] = to }, ct);
 
         if (rows.Count == 0) return $"Aucune vente {SagePeriod.Describe(from, to)}.";
@@ -82,13 +74,38 @@ public sealed class PilotageTools
             ("Famille", r => SageFormat.Text(r["Famille"])),
             ("Articles", r => SageFormat.ToLong(r["NbArticles"]).ToString()),
             ("Qté vendue", r => SageFormat.ToDecimal(r["Qte"]).ToString("N0", SageFormat.Fr)),
-            ("CA HT", r => SageFormat.Euro(r["CA_HT"])),
+            ("CA HT", r => SageFormat.Euro(r["Montant_HT"])),
             ("% du total", r => total == 0 ? "0 %"
-                : (SageFormat.ToDecimal(r["CA_HT"]) / total).ToString("P1", SageFormat.Fr)));
+                : (SageFormat.ToDecimal(r["Montant_HT"]) / total).ToString("P1", SageFormat.Fr)));
 
         return $"## CA par famille d'articles {SagePeriod.Describe(from, to)}\n\n" + table +
                $"\n**Total CA HT : {SageFormat.Euro(total)}** ({rows.Count} familles)";
     }
+
+    /// <summary>
+    /// Montants, quantités et nombre d'articles par famille, sur les lignes F_DOCLIGNE filtrées par
+    /// <paramref name="filtreLignes"/> (alias <c>l</c>) et par période (@from/@to). Colonnes : Famille,
+    /// Montant_HT, Qte, NbArticles, GrandTotal.
+    /// <para>
+    /// Les lignes sont agrégées par article <i>avant</i> la jointure à F_ARTICLE, et le plan est forcé en
+    /// série : sur CRISTAL_ET_BRONZE (600 000 articles), le plan parallèle de la jointure ne rendait jamais
+    /// la main (timeout de 120 s), contre 3 s en série.
+    /// </para>
+    /// </summary>
+    internal static string FamilleSql(int top, string filtreLignes) =>
+        $@"WITH parArticle AS (
+             SELECT l.AR_Ref, SUM(l.DL_MontantHT) AS HT, SUM(l.DL_Qte) AS Qte
+             FROM F_DOCLIGNE l
+             WHERE {filtreLignes} AND l.DO_Date BETWEEN @from AND @to
+             GROUP BY l.AR_Ref)
+           SELECT TOP ({top}) ISNULL(NULLIF(CAST(a.FA_CodeFamille AS varchar(50)), ''), '(sans famille)') AS Famille,
+                  SUM(p.HT) AS Montant_HT, SUM(p.Qte) AS Qte, COUNT(p.AR_Ref) AS NbArticles,
+                  SUM(SUM(p.HT)) OVER () AS GrandTotal
+           FROM parArticle p
+           LEFT JOIN F_ARTICLE a ON a.AR_Ref = p.AR_Ref
+           GROUP BY ISNULL(NULLIF(CAST(a.FA_CodeFamille AS varchar(50)), ''), '(sans famille)')
+           ORDER BY Montant_HT DESC
+           OPTION (MAXDOP 1)";
 
     [McpServerTool(Name = "sage_top_fournisseurs")]
     [Description("Top fournisseurs par montant facturé sur une période (mouvements comptables des comptes 401). " +
@@ -380,14 +397,29 @@ public sealed class PilotageTools
         [Description("Nombre maximum de commandes retenues (défaut 50, maximum 500). En mode détaillé, toutes les lignes de ces commandes sont affichées.")] int? limite = null,
         [Description("Nom de la base Sage (vide = base par défaut).")] string? base_sage = null,
         CancellationToken ct = default)
+        => await CommandesDetailAsync(registry, achat: false, client, piece, date_debut, date_fin, livraison_avant,
+            inclure_soldees, detail_lignes, limite, base_sage, ct);
+
+    /// <summary>
+    /// Corps commun de sage_commandes_clients_detail et sage_commandes_fournisseurs_detail : bons de commande
+    /// de vente (domaine 0, type 1) ou d'achat (domaine 1, type 12).
+    /// </summary>
+    internal static async Task<string> CommandesDetailAsync(
+        SageDatabaseRegistry registry, bool achat, string? tiers, string? piece, string? date_debut, string? date_fin,
+        string? livraison_avant, bool? inclure_soldees, bool? detail_lignes, int? limite, string? base_sage,
+        CancellationToken ct)
     {
         var n = Math.Clamp(limite ?? 50, 1, 500);
         var parLigne = detail_lignes ?? true;
+        var domaine = achat ? 1 : 0;
+        var typeCmd = achat ? 12 : 1;
+        var qui = achat ? "fournisseur" : "client";
+        var quiTitre = achat ? "fournisseurs" : "clients";
 
-        var filtres = new List<string> { "d.DO_Domaine = 0", "d.DO_Type = 1" };
+        var filtres = new List<string> { $"d.DO_Domaine = {domaine}", $"d.DO_Type = {typeCmd}" };
         if (inclure_soldees != true) filtres.Add("d.DO_Cloture = 0");
         var prm = new Dictionary<string, object?>();
-        if (!string.IsNullOrWhiteSpace(client)) { filtres.Add("d.DO_Tiers = @client"); prm["@client"] = client.Trim(); }
+        if (!string.IsNullOrWhiteSpace(tiers)) { filtres.Add("d.DO_Tiers = @client"); prm["@client"] = tiers.Trim(); }
         if (!string.IsNullOrWhiteSpace(piece)) { filtres.Add("d.DO_Piece = @piece"); prm["@piece"] = piece.Trim(); }
         if (!string.IsNullOrWhiteSpace(date_debut)) { filtres.Add("d.DO_Date >= @from"); prm["@from"] = SagePeriod.ParseDate(date_debut, DateTime.Today); }
         if (!string.IsNullOrWhiteSpace(date_fin)) { filtres.Add("d.DO_Date <= @to"); prm["@to"] = SagePeriod.ParseDate(date_fin, DateTime.Today).AddDays(1).AddTicks(-1); }
@@ -411,7 +443,7 @@ public sealed class PilotageTools
                WHERE {where}
                ORDER BY {ordre}", prm, ct);
 
-        if (commandes.Count == 0) return "Aucune commande client ne correspond à ces critères.";
+        if (commandes.Count == 0) return $"Aucune commande {qui} ne correspond à ces critères.";
 
         var totaux = await registry.QueryAsync(base_sage,
             $@"SELECT COUNT(*) AS NbCmd, SUM(d.DO_TotalHT) AS TotalHT
@@ -437,11 +469,11 @@ public sealed class PilotageTools
                     ? $@"SELECT l.DO_Piece, l.DL_Ligne, l.AR_Ref, l.DL_Design, l.DL_Qte,
                                 l.DL_MontantHT, l.DO_DateLivr
                          FROM F_DOCLIGNE l
-                         WHERE l.DO_Domaine = 0 AND l.DO_Type = 1 AND l.DO_Piece IN ({listePieces})
+                         WHERE l.DO_Domaine = {domaine} AND l.DO_Type = {typeCmd} AND l.DO_Piece IN ({listePieces})
                          ORDER BY l.DO_Piece, l.DL_Ligne"
                     : $@"SELECT l.DO_Piece, COUNT(*) AS NbLignes
                          FROM F_DOCLIGNE l
-                         WHERE l.DO_Domaine = 0 AND l.DO_Type = 1 AND l.DO_Piece IN ({listePieces})
+                         WHERE l.DO_Domaine = {domaine} AND l.DO_Type = {typeCmd} AND l.DO_Piece IN ({listePieces})
                          GROUP BY l.DO_Piece",
                 prmLignes, ct);
 
@@ -491,8 +523,8 @@ public sealed class PilotageTools
         {
             ("Pièce", r => SageFormat.Text(r["DO_Piece"])),
             ("Commande", r => SageFormat.DateOpt(r["DO_Date"])),
-            ("Livraison", r => SageFormat.DateOpt(r["_Livraison"])),
-            ("Client", r => SageFormat.Text(r["DO_Tiers"])),
+            (achat ? "Réception" : "Livraison", r => SageFormat.DateOpt(r["_Livraison"])),
+            (achat ? "Fournisseur" : "Client", r => SageFormat.Text(r["DO_Tiers"])),
             ("Intitulé", r => SageFormat.Text(r["CT_Intitule"])),
             ("Statut", r => StatutCommande(r["DO_Statut"], r["DO_Cloture"]))
         };
@@ -509,7 +541,7 @@ public sealed class PilotageTools
         }
         colonnes.Add(("Montant HT", r => SageFormat.Euro(r["_Montant"])));
 
-        var titre = parLigne ? "Détail des lignes de commandes clients" : "Commandes clients (une ligne par commande)";
+        var titre = parLigne ? $"Détail des lignes de commandes {quiTitre}" : $"Commandes {quiTitre} (une ligne par commande)";
         var sb = new StringBuilder($"## {titre}\n\n");
         sb.Append(SageFormat.Table(affichees, colonnes.ToArray()));
         sb.AppendLine($"\n**{SageFormat.Euro(totalAffiche)}** sur {commandes.Count} commande(s)" +
@@ -520,8 +552,8 @@ public sealed class PilotageTools
         return sb.ToString();
     }
 
-    /// <summary>Libellé du statut d'une commande de vente (énumération Sage DO_Statut) et de sa clôture.</summary>
-    private static string StatutCommande(object? statut, object? cloture)
+    /// <summary>Libellé du statut d'une commande (énumération Sage DO_Statut) et de sa clôture.</summary>
+    internal static string StatutCommande(object? statut, object? cloture)
     {
         var libelle = SageFormat.ToLong(statut) switch
         {

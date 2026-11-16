@@ -104,27 +104,37 @@ public sealed class SuiviTools
         [Description("Numéro de pièce de la facture (ex. '729340').")] string piece,
         [Description("Nom de la base Sage (vide = base par défaut).")] string? base_sage = null,
         CancellationToken ct = default)
+        => await DetailFactureAsync(registry, achat: false, piece, base_sage, ct);
+
+    /// <summary>
+    /// Corps commun de sage_detail_facture et sage_detail_facture_fournisseur : facture de vente
+    /// (domaine 0, types 6/7) ou d'achat (domaine 1, types 16/17).
+    /// </summary>
+    internal static async Task<string> DetailFactureAsync(
+        SageDatabaseRegistry registry, bool achat, string piece, string? base_sage, CancellationToken ct)
     {
+        var domaine = achat ? 1 : 0;
+        var types = achat ? "16, 17" : "6, 7";
         var prm = new Dictionary<string, object?> { ["@p"] = piece.Trim() };
         var entetes = await registry.QueryAsync(base_sage,
-            @"SELECT TOP 1 d.DO_Piece, d.DO_Type, d.DO_Date, d.DO_Ref, d.DO_Tiers, MAX(c.CT_Intitule) AS Intitule,
+            $@"SELECT TOP 1 d.DO_Piece, d.DO_Type, d.DO_Date, d.DO_Ref, d.DO_Tiers, MAX(c.CT_Intitule) AS Intitule,
                      d.DO_TotalHT, d.DO_TotalTTC, d.DO_NetAPayer
               FROM F_DOCENTETE d LEFT JOIN F_COMPTET c ON c.CT_Num = d.DO_Tiers
-              WHERE d.DO_Domaine = 0 AND d.DO_Type IN (6, 7) AND d.DO_Piece = @p
+              WHERE d.DO_Domaine = {domaine} AND d.DO_Type IN ({types}) AND d.DO_Piece = @p
               GROUP BY d.DO_Piece, d.DO_Type, d.DO_Date, d.DO_Ref, d.DO_Tiers, d.DO_TotalHT, d.DO_TotalTTC, d.DO_NetAPayer
               ORDER BY d.DO_Type DESC", prm, ct);
-        if (entetes.Count == 0) return $"Facture « {piece} » introuvable (ventes).";
+        if (entetes.Count == 0) return $"Facture « {piece} » introuvable ({(achat ? "achats" : "ventes")}).";
         var h = entetes[0];
 
         var lignes = await registry.QueryAsync(base_sage,
-            @"SELECT DL_Ligne, AR_Ref, DL_Design, DL_Qte, DL_PrixUnitaire, DL_MontantHT
+            $@"SELECT DL_Ligne, AR_Ref, DL_Design, DL_Qte, DL_PrixUnitaire, DL_MontantHT
               FROM F_DOCLIGNE
-              WHERE DO_Domaine = 0 AND DO_Piece = @p AND DO_Type = @type
+              WHERE DO_Domaine = {domaine} AND DO_Piece = @p AND DO_Type = @type
               ORDER BY DL_Ligne",
             new Dictionary<string, object?> { ["@p"] = piece.Trim(), ["@type"] = SageFormat.ToLong(h["DO_Type"]) }, ct);
 
-        var sb = new StringBuilder($"## Facture {SageFormat.Text(h["DO_Piece"])}\n\n");
-        sb.AppendLine($"- **Client** : {SageFormat.Text(h["DO_Tiers"])} — {SageFormat.Text(h["Intitule"])}");
+        var sb = new StringBuilder($"## Facture {(achat ? "fournisseur " : "")}{SageFormat.Text(h["DO_Piece"])}\n\n");
+        sb.AppendLine($"- **{(achat ? "Fournisseur" : "Client")}** : {SageFormat.Text(h["DO_Tiers"])} — {SageFormat.Text(h["Intitule"])}");
         sb.AppendLine($"- **Date** : {SageFormat.Date(h["DO_Date"])}");
         if (!string.IsNullOrWhiteSpace(SageFormat.Text(h["DO_Ref"]))) sb.AppendLine($"- **Référence** : {SageFormat.Text(h["DO_Ref"])}");
         sb.AppendLine($"- **Total HT** : {SageFormat.Euro(h["DO_TotalHT"])} · **TTC** : {SageFormat.Euro(h["DO_TotalTTC"])} · **Net à payer** : {SageFormat.Euro(h["DO_NetAPayer"])}");
